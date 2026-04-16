@@ -1,16 +1,38 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Wheelbarrow</title>
-    <link rel="stylesheet" href="css/style.css">
+  <meta charset="UTF-8">
+  <title>Wheelbarrow</title>
+  <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
+
+  <div id="login-screen">
+    <div id="login-box">
+      <h1>Wheelbarrow</h1>
+      <p>A real-time MMO. You are a wheelbarrow.</p>
+      <input id="username-input" type="text" placeholder="Enter username" maxlength="32" autocomplete="off">
+      <button id="login-btn">Play</button>
+      <p id="login-error"></p>
+    </div>
+  </div>
+
+  <div id="game-screen" style="display:none">
     <canvas id="game"></canvas>
-    <script src="js/ws.js"></script>
-    <script src="js/input.js"></script>
-    <script src="js/renderer.js"></script>
-    <script src="js/game.js"></script>
+    <div id="hud">
+      <div id="hud-coins">💰 <span id="hud-coins-val">0</span></div>
+      <div id="hud-bucket">
+        <div id="hud-bucket-label">Bucket</div>
+        <div id="hud-bucket-contents"></div>
+        <div id="hud-bucket-bar"><div id="hud-bucket-fill"></div></div>
+      </div>
+      <div id="hud-hint"></div>
+    </div>
+  </div>
+
+  <script src="js/ws.js"></script>
+  <script src="js/input.js"></script>
+  <script src="js/renderer.js"></script>
+  <script src="js/game.js"></script>
 </body>
 </html>

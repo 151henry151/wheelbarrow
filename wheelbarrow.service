@@ -1,18 +1,18 @@
 [Unit]
-Description=Wheelbarrow MMO (uvicorn / FastAPI)
-After=network-online.target mariadb.service
+Description=Wheelbarrow MMO (Docker)
+After=network-online.target docker.service
 Wants=network-online.target
+Requires=docker.service
 
 [Service]
 Type=simple
 User=henry
 Group=henry
 WorkingDirectory=/home/henry/wheelbarrow
-EnvironmentFile=/home/henry/wheelbarrow/.env
-ExecStart=/home/henry/wheelbarrow/venv/bin/python3 -m uvicorn server.main:app --host 127.0.0.1 --port 8765
+ExecStart=/usr/bin/docker compose up
+ExecStop=/usr/bin/docker compose down
 Restart=on-failure
-RestartSec=5
-NoNewPrivileges=true
+RestartSec=10
 
 [Install]
 WantedBy=multi-user.target
