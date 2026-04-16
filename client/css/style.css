@@ -53,12 +53,39 @@ body {
 #game-screen { position: relative; }
 canvas { display: block; image-rendering: pixelated; }
 
-/* ---------------------------------------------------------------------- HUD */
-#hud {
+/* -------------------------------------------------------------- HUD toggle */
+#hud-toggle {
   position: fixed;
   top: 12px;
   left: 12px;
-  background: rgba(0,0,0,0.7);
+  background: rgba(0,0,0,0.55);
+  border: 1px solid #444;
+  padding: 4px 10px;
+  font-size: 0.74rem;
+  color: #888;
+  pointer-events: none;
+  z-index: 5;
+}
+
+/* ------------------------------------------------------------ Town info bar */
+#town-info {
+  position: fixed;
+  bottom: 56px;
+  left: 12px;
+  background: rgba(0,0,0,0.60);
+  border: 1px solid #444;
+  padding: 4px 10px;
+  font-size: 0.76rem;
+  color: #a0c0e0;
+  pointer-events: none;
+}
+
+/* ---------------------------------------------------------------------- HUD */
+#hud {
+  position: fixed;
+  top: 36px;
+  left: 12px;
+  background: rgba(0,0,0,0.72);
   border: 1px solid #555;
   padding: 10px 14px;
   min-width: 190px;
@@ -79,9 +106,9 @@ canvas { display: block; image-rendering: pixelated; }
 /* ---------------------------------------------------------- WB condition HUD */
 #hud-wb {
   position: fixed;
-  top: 12px;
+  top: 36px;
   right: 12px;
-  background: rgba(0,0,0,0.7);
+  background: rgba(0,0,0,0.72);
   border: 1px solid #555;
   padding: 8px 12px;
   min-width: 160px;
@@ -99,27 +126,30 @@ canvas { display: block; image-rendering: pixelated; }
 #wb-flat-ind { color: #e06060; font-size: 0.68rem; }
 #wb-upgrades { border-top: 1px solid #333; margin-top: 6px; padding-top: 4px; font-size: 0.68rem; color: #777; }
 
-/* ------------------------------------------------------------ Build menu */
+/* ------------------------------------------------------------ Overlay menus */
 #build-menu,
 #shop-menu,
-#pile-menu {
+#pile-menu,
+#town-menu {
   position: fixed;
   top: 12px;
   right: 12px;
-  background: rgba(0,0,0,0.9);
+  background: rgba(0,0,0,0.92);
   border: 1px solid #7ab648;
   padding: 12px 16px;
   min-width: 280px;
-  max-width: 340px;
+  max-width: 360px;
   font-size: 0.82rem;
   z-index: 10;
 }
 #build-menu-title,
 #shop-menu-title,
-#pile-menu-title  { color: #7ab648; font-size: 0.9rem; margin-bottom: 8px; }
+#pile-menu-title,
+#town-menu-title  { color: #7ab648; font-size: 0.9rem; margin-bottom: 8px; }
 #build-menu-items,
 #shop-menu-items,
-#pile-menu-items  { line-height: 2; }
+#pile-menu-items,
+#town-menu-items  { line-height: 2; }
 .build-option     { cursor: default; }
 .build-option.affordable   { color: #e8e8e8; }
 .build-option.unaffordable { color: #555; }

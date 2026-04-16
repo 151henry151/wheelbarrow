@@ -18,8 +18,15 @@ const Renderer = (() => {
     fall:   'rgba(200,100,0,0.06)',
     winter: 'rgba(180,220,255,0.08)',
   };
+  // Town boundary colours, cycled by town.id
+  const TOWN_COLORS = [
+    '#6a8aff','#6affa0','#ffa06a','#ff6a9a','#a06aff',
+    '#6affff','#ffff6a','#ff9a6a','#6aff8a','#9a6aff',
+  ];
 
   let canvas, ctx, s;
+  // Cached camera position for helpers called without args
+  let _camX = 0, _camY = 0, _vpW = 0, _vpH = 0;
 
   function init(c, st) {
     canvas = c; ctx = c.getContext('2d'); s = st;
@@ -34,12 +41,15 @@ const Renderer = (() => {
     const W = canvas.width, H = canvas.height;
     ctx.clearRect(0, 0, W, H);
 
-    const camX = s.player.x * T - W/2 + T/2;
-    const camY = s.player.y * T - H/2 + T/2;
-    ctx.save();
-    ctx.translate(-camX, -camY);
+    _camX = s.player.x * T - W/2 + T/2;
+    _camY = s.player.y * T - H/2 + T/2;
+    _vpW = W; _vpH = H;
 
-    _drawTiles(camX, camY, W, H);
+    ctx.save();
+    ctx.translate(-_camX, -_camY);
+
+    _drawTiles(_camX, _camY, W, H);
+    _drawTowns();
     _drawParcels();
     _drawMarket();
     _drawNpcShops();
@@ -55,16 +65,17 @@ const Renderer = (() => {
     const seasonName = s.season ? s.season.name : 'spring';
     const tint = SEASON_TILE_TINT[seasonName];
 
-    const sx = Math.max(0,               Math.floor(camX / T));
-    const sy = Math.max(0,               Math.floor(camY / T));
-    const ex = Math.min(s.world.w - 1,   Math.ceil((camX + W) / T));
-    const ey = Math.min(s.world.h - 1,   Math.ceil((camY + H) / T));
+    const wx = s.world ? s.world.w : 1000;
+    const wy = s.world ? s.world.h : 1000;
+    const sx = Math.max(0,       Math.floor(camX / T));
+    const sy = Math.max(0,       Math.floor(camY / T));
+    const ex = Math.min(wx - 1,  Math.ceil((camX + W) / T));
+    const ey = Math.min(wy - 1,  Math.ceil((camY + H) / T));
 
     for (let ty = sy; ty <= ey; ty++) {
       for (let tx = sx; tx <= ex; tx++) {
-        // Subtle colour variation using a simple hash
         const h = (tx * 7 + ty * 13) & 0xff;
-        const base = (tx + ty) % 2 === 0 ? 74 : 80;  // two shades of green
+        const base = (tx + ty) % 2 === 0 ? 74 : 80;
         const r = 50 + ((h & 0x0f) >> 1);
         const g = base + ((h >> 4) & 0x07);
         const b = 45;
@@ -79,34 +90,119 @@ const Renderer = (() => {
     }
   }
 
+  function _drawTowns() {
+    for (const town of (s.towns || [])) {
+      const poly = town.boundary;
+      if (!poly || poly.length < 3) continue;
+      const col = TOWN_COLORS[town.id % TOWN_COLORS.length];
+
+      ctx.beginPath();
+      ctx.moveTo(poly[0].x * T + T/2, poly[0].y * T + T/2);
+      for (let i = 1; i < poly.length; i++) {
+        ctx.lineTo(poly[i].x * T + T/2, poly[i].y * T + T/2);
+      }
+      ctx.closePath();
+
+      // Very faint interior fill
+      ctx.globalAlpha = 0.04;
+      ctx.fillStyle = col;
+      ctx.fill();
+
+      // Boundary line
+      ctx.globalAlpha = 0.28;
+      ctx.strokeStyle = col;
+      ctx.lineWidth = 2.5;
+      ctx.stroke();
+      ctx.globalAlpha = 1.0;
+
+      // Town name near centre (only if in viewport)
+      const cnx = town.center_x * T + T/2;
+      const cny = town.center_y * T + T/2;
+      if (cnx > _camX - 300 && cnx < _camX + _vpW + 300 &&
+          cny > _camY - 300 && cny < _camY + _vpH + 300) {
+        ctx.globalAlpha = 0.55;
+        ctx.fillStyle = col;
+        ctx.font = 'bold 13px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText(town.name, cnx, cny - 12);
+        ctx.globalAlpha = 1.0;
+      }
+    }
+  }
+
   function _drawParcels() {
-    const PARCEL_SIZE = 10;
-    for (const p of s.parcels) {
-      const ox  = p.px * PARCEL_SIZE * T;
-      const oy  = p.py * PARCEL_SIZE * T;
-      const sz  = PARCEL_SIZE * T;
-      const own = s.player && p.owner_id === s.player.id;
+    if (!s.player) return;
+    const px = s.player.x, py = s.player.y;
+    // Visible tile range
+    const tileLeft   = Math.floor(_camX / T) - 1;
+    const tileRight  = Math.ceil((_camX + _vpW) / T) + 1;
+    const tileTop    = Math.floor(_camY / T) - 1;
+    const tileBottom = Math.ceil((_camY + _vpH) / T) + 1;
 
-      ctx.fillStyle = own ? 'rgba(100,200,100,0.08)' : 'rgba(200,200,100,0.06)';
-      ctx.fillRect(ox, oy, sz, sz);
+    for (const p of (s.world_parcels || [])) {
+      // Viewport cull (AABB in tile space)
+      if (p.x + p.w < tileLeft || p.x > tileRight ||
+          p.y + p.h < tileTop  || p.y > tileBottom) continue;
 
-      ctx.strokeStyle = own ? 'rgba(100,220,100,0.35)' : 'rgba(200,200,100,0.25)';
-      ctx.lineWidth = 1;
-      ctx.strokeRect(ox + 0.5, oy + 0.5, sz - 1, sz - 1);
+      const ox = p.x * T, oy = p.y * T;
+      const pw = p.w * T, ph = p.h * T;
+      const isMine    = s.player && p.owner_id === s.player.id;
+      const isPreview = s.parcelPreview === p.id;
+      const isCurrent = (px >= p.x && px < p.x + p.w &&
+                         py >= p.y && py < p.y + p.h);
 
-      ctx.fillStyle = own ? 'rgba(100,200,100,0.55)' : 'rgba(200,200,100,0.40)';
-      ctx.font = '9px monospace';
-      ctx.textAlign = 'center';
-      ctx.fillText(p.owner_name, ox + sz/2, oy + sz/2);
-    }
+      // Background fill
+      if (isPreview) {
+        ctx.fillStyle = 'rgba(255,220,50,0.18)';
+        ctx.fillRect(ox, oy, pw, ph);
+      } else if (isMine) {
+        ctx.fillStyle = 'rgba(100,200,100,0.10)';
+        ctx.fillRect(ox, oy, pw, ph);
+      } else if (isCurrent && !p.owner_id) {
+        ctx.fillStyle = 'rgba(255,255,200,0.07)';
+        ctx.fillRect(ox, oy, pw, ph);
+      }
 
-    ctx.strokeStyle = 'rgba(255,255,255,0.04)';
-    ctx.lineWidth = 1;
-    for (let gx = 0; gx <= s.world.w; gx += PARCEL_SIZE) {
-      ctx.beginPath(); ctx.moveTo(gx*T, 0); ctx.lineTo(gx*T, s.world.h*T); ctx.stroke();
-    }
-    for (let gy = 0; gy <= s.world.h; gy += PARCEL_SIZE) {
-      ctx.beginPath(); ctx.moveTo(0, gy*T); ctx.lineTo(s.world.w*T, gy*T); ctx.stroke();
+      // Border
+      if (isPreview) {
+        ctx.strokeStyle = 'rgba(255,220,50,0.92)';
+        ctx.lineWidth = 2.5;
+      } else if (isMine) {
+        ctx.strokeStyle = 'rgba(100,220,100,0.55)';
+        ctx.lineWidth = 1;
+      } else if (isCurrent) {
+        ctx.strokeStyle = 'rgba(255,255,255,0.50)';
+        ctx.lineWidth = 1.5;
+      } else if (p.owner_id) {
+        ctx.strokeStyle = 'rgba(200,120,100,0.22)';
+        ctx.lineWidth = 0.5;
+      } else {
+        ctx.strokeStyle = 'rgba(180,180,100,0.18)';
+        ctx.lineWidth = 0.5;
+      }
+      ctx.strokeRect(ox + 0.5, oy + 0.5, pw - 1, ph - 1);
+
+      // Label
+      if (isPreview) {
+        ctx.fillStyle = 'rgba(255,220,50,0.95)';
+        ctx.font = 'bold 10px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText(`${p.price}c`, ox + pw/2, oy + ph/2 - 3);
+        if (pw >= 64 && ph >= 32) {
+          ctx.font = '9px monospace';
+          ctx.fillText('B to confirm', ox + pw/2, oy + ph/2 + 9);
+        }
+      } else if (isMine && pw >= 32 && ph >= 24) {
+        ctx.fillStyle = 'rgba(100,220,100,0.75)';
+        ctx.font = '9px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText(p.owner_name || '', ox + pw/2, oy + ph/2 + 3);
+      } else if (p.owner_id && isCurrent && pw >= 32) {
+        ctx.fillStyle = 'rgba(220,150,100,0.80)';
+        ctx.font = '9px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText(p.owner_name || '?', ox + pw/2, oy + ph/2 + 3);
+      }
     }
   }
 
@@ -148,7 +244,9 @@ const Renderer = (() => {
       ctx.fillStyle = pile.sell_price != null ? '#f5c842' : '#aaa';
       ctx.font = '7px monospace';
       ctx.textAlign = 'center';
-      const label = pile.sell_price != null ? `${pile.resource_type[0].toUpperCase()} ${pile.sell_price}c` : pile.resource_type[0].toUpperCase();
+      const label = pile.sell_price != null
+        ? `${pile.resource_type[0].toUpperCase()} ${pile.sell_price}c`
+        : pile.resource_type[0].toUpperCase();
       ctx.fillText(label, px + T/2, py + T - 4);
     }
   }
@@ -172,7 +270,6 @@ const Renderer = (() => {
       const nx = node.x * T, ny = node.y * T;
 
       if (node.is_market) {
-        // Player market
         ctx.fillStyle = '#603060';
         ctx.fillRect(nx + 2, ny + 2, T - 4, T - 4);
         ctx.strokeStyle = '#c060c0';
@@ -184,6 +281,24 @@ const Renderer = (() => {
         ctx.fillText('MKT', nx + T/2, ny + T/2 + 3);
         if (node.owner_name) {
           ctx.fillStyle = 'rgba(200,160,200,0.8)';
+          ctx.font = '7px monospace';
+          ctx.fillText(node.owner_name, nx + T/2, ny + 9);
+        }
+        continue;
+      }
+
+      if (node.is_town_hall) {
+        ctx.fillStyle = '#4a3a1a';
+        ctx.fillRect(nx + 1, ny + 1, T - 2, T - 2);
+        ctx.strokeStyle = '#d4a830';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(nx + 1, ny + 1, T - 2, T - 2);
+        ctx.fillStyle = '#f5c842';
+        ctx.font = 'bold 7px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText('HALL', nx + T/2, ny + T/2 + 3);
+        if (node.owner_name) {
+          ctx.fillStyle = 'rgba(245,200,66,0.8)';
           ctx.font = '7px monospace';
           ctx.fillText(node.owner_name, nx + T/2, ny + 9);
         }
@@ -206,7 +321,6 @@ const Renderer = (() => {
       ctx.fillStyle = pct > 0.4 ? '#7ee87e' : '#e07e40';
       ctx.fillRect(nx + 2, ny + T - 7, (T-4)*pct, 5);
 
-      // Label
       ctx.fillStyle = '#fff';
       ctx.font = 'bold 11px monospace';
       ctx.textAlign = 'center';
@@ -231,11 +345,9 @@ const Renderer = (() => {
   }
 
   function _wheelbarrow(px, py, color, label, flatTire) {
-    // Bucket (body)
     ctx.fillStyle = color;
     ctx.fillRect(px + 6, py + 8, T - 12, T - 18);
 
-    // Wheel
     ctx.beginPath();
     ctx.arc(px + T/2, py + T - 5, 5, 0, Math.PI * 2);
     ctx.fillStyle = flatTire ? '#e06060' : '#222';
@@ -246,7 +358,6 @@ const Renderer = (() => {
       ctx.stroke();
     }
 
-    // Handles
     ctx.strokeStyle = color;
     ctx.lineWidth = 2;
     ctx.beginPath();
@@ -254,11 +365,10 @@ const Renderer = (() => {
     ctx.moveTo(px + T-4, py + 10); ctx.lineTo(px + T-4, py + T - 4);
     ctx.stroke();
 
-    // Name label
     ctx.fillStyle = '#fff';
     ctx.font = '9px monospace';
     ctx.textAlign = 'center';
-    ctx.fillText(label, px + T/2, py + 7);
+    ctx.fillText(label || '', px + T/2, py + 7);
   }
 
   return { init, draw };

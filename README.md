@@ -25,23 +25,25 @@ Inspired by the spirit of [A Tractor](https://store.steampowered.com/app/779050/
 |---|---|
 | Arrow keys | Move |
 | Space | Sell at NPC market |
-| B | Buy current land parcel (500c) |
+| B | Preview parcel under your feet; press B again to confirm purchase |
 | P | Open build menu (on own land) |
 | U | Unload bucket to resource pile (on own land) |
-| E | Context interact — open NPC shop / manage pile prices / trade at player market |
+| E | Context interact — town hall / NPC shop / manage pile prices / trade at player market |
 | F | Farm action — plant wheat / fertilize / harvest |
+| H | Toggle HUD (hidden by default — just press H to see it) |
 | 1–9 | Select item in any open menu |
-| Esc | Close menu |
+| Esc | Cancel parcel preview / close menu |
 
 ### The economy ladder
-1. **Spawn** — collect free resources near spawn (manure, gravel, topsoil, compost)
-2. **Sell** at the NPC primary market; prices drift based on supply
-3. **Buy land** — 500c per 10×10 parcel
+1. **Spawn** — explore outwards to find resources; the starting field is intentionally bare
+2. **Sell** at the NPC primary market (about 60 tiles south of spawn); prices drift based on supply
+3. **Buy land** — parcels are variable size and price; press B once to preview the outline and price, B again to buy
 4. **Pile resources** on your land (`U`), set a sell price (`E`), and let other players buy from you — no market building required
 5. **Build structures** — horse stable, gravel pit, compost heap; other players pay you a fee when they collect
 6. **Build a Player Market** (2000c + 50 wood + 30 stone) — set custom buy and sell prices for any goods; the most powerful economic tool in the game
 7. **Farm wheat** — buy seeds from the Seed Shop, plant on owned land, optionally fertilize for double yield, harvest in ~10–20 min
-8. **Upgrade your wheelbarrow** at the General Store — larger bucket, better tyres, stronger handle, better barrow material (6 levels each, very expensive at top end)
+8. **Build a Town Hall** (5000c + materials) to become a town's founder — name it, set a sales tax (0–30%), and govern which structures and goods are allowed
+9. **Upgrade your wheelbarrow** at the General Store — larger bucket, better tyres, stronger handle, better barrow material (6 levels each, very expensive at top end)
 
 ### Wheelbarrow condition
 Your wheelbarrow degrades as you move:
@@ -51,12 +53,22 @@ Your wheelbarrow degrades as you move:
 
 Repair at the **Repair Shop** (50,44). Upgrades reduce wear rates.
 
+### Towns
+The world contains 40 procedurally generated towns with irregular polygon boundaries and names like "Greenford" or "Ironwick". Entering a town shows its name and any sales tax. Town leaders govern through the Town Hall:
+
+- Set sales tax (0–30%) on player-to-player transactions in the town
+- Rename the town (founder only, once)
+- Withdraw accumulated taxes from the treasury
+- (Future: ban structures/goods, hold elections among landowners)
+
 ### NPC shops
+All NPC shops are ~56 tiles from spawn — not visible at the starting field. Explore to find them.
+
 | Shop | Location | Sells |
 |---|---|---|
-| Seed Shop | (56,50) | Wheat seeds, fertilizer |
-| General Store | (44,50) | Wheelbarrow upgrades (6 levels each) |
-| Repair Shop | (50,44) | Condition repairs, flat tyre fix |
+| Seed Shop | (556, 500) | Wheat seeds, fertilizer |
+| General Store | (444, 500) | Wheelbarrow upgrades (6 levels each) |
+| Repair Shop | (500, 444) | Condition repairs, flat tyre fix |
 
 ### Seasons
 The year cycles through **Spring → Summer → Fall → Winter** (15 minutes each). Farming is tuned around the season cycle; the current season and time remaining are shown in the HUD.
@@ -101,7 +113,8 @@ wheelbarrow/
 │   │   ├── tick.py       # Server-side game loop (asyncio)
 │   │   ├── constants.py  # Game constants and definitions
 │   │   ├── seasons.py    # Season clock
-│   │   └── wb_condition.py # Wheelbarrow condition/decay
+│   │   ├── wb_condition.py # Wheelbarrow condition/decay
+│   │   └── world_gen.py  # Procedural world generation (runs once at startup)
 │   └── db/
 │       ├── connection.py # aiomysql connection pool
 │       └── queries.py    # All DB queries
@@ -154,4 +167,4 @@ See `wheelbarrow.service` for the service unit template. Deployment is handled m
 
 ## Version
 
-Current version: **0.4.0**. See [CHANGELOG.md](CHANGELOG.md).
+Current version: **0.5.0**. See [CHANGELOG.md](CHANGELOG.md).

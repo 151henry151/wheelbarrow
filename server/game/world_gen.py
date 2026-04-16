@@ -1,0 +1,298 @@
+"""
+Procedural world generation.
+
+Runs once at startup (guarded by world_gen_state.done). Generates:
+  - 40 towns with organic, irregular polygon boundaries
+  - ~500 resource nodes distributed by biome
+  - ~700 land parcels of varying size and price
+"""
+import math
+import random
+import json
+from server.game.constants import (
+    WORLD_W, WORLD_H,
+    TOWN_ADJ, TOWN_NOUN, TOWN_COUNT, TOWN_MIN_DIST,
+    TOWN_RADIUS_MIN, TOWN_RADIUS_MAX,
+    PARCEL_W_RANGE, PARCEL_H_RANGE,
+    PARCEL_PRICE_PER_TILE, PARCEL_RESOURCE_BONUS, PARCEL_MIN_PRICE,
+    TOWN_PARCELS_PER_TOWN, WILDERNESS_PARCELS,
+    PLAYER_SPAWN, MARKET_TILE, NPC_SHOP_LOCATIONS,
+)
+from server.db import queries
+
+# ---- Biome helpers ----------------------------------------------------------
+
+def _biome(x: int, y: int) -> str:
+    """
+    Simple smooth biome from position. Returns one of:
+    'forest', 'rocky', 'plains', 'wetland'
+    """
+    nx, ny = x / 250, y / 250
+    v = (math.sin(nx * 2.1) * math.cos(ny * 1.7) +
+         math.cos(nx * 1.3 + ny * 0.9) + 2.0) / 4.0
+    if v < 0.25: return "wetland"
+    if v < 0.50: return "plains"
+    if v < 0.75: return "forest"
+    return "rocky"
+
+
+BIOME_RESOURCES = {
+    "forest":  [("wood",    80,  0.04), ("dirt",   50, 0.06)],
+    "rocky":   [("stone",  120,  0.02), ("gravel", 100, 0.03)],
+    "plains":  [("dirt",    60,  0.07), ("manure", 100, 0.50), ("topsoil", 80, 0.40)],
+    "wetland": [("clay",   100,  0.05), ("compost", 80, 0.20)],
+}
+
+# ---- Town placement ---------------------------------------------------------
+
+def _place_towns(rng: random.Random) -> list[dict]:
+    """
+    Place TOWN_COUNT towns with irregular, Voronoi-like polygon boundaries.
+    Returns list of town dicts ready for DB insertion (no IDs yet).
+    """
+    centres: list[tuple[int,int]] = []
+
+    # Always place a spawn town near PLAYER_SPAWN
+    spawn_cx, spawn_cy = PLAYER_SPAWN
+    adj  = rng.choice(TOWN_ADJ)
+    noun = rng.choice(TOWN_NOUN)
+    radius = 120
+    poly = _generate_polygon(spawn_cx, spawn_cy, radius, rng, points=16)
+    towns: list[dict] = [{
+        "name":     f"{adj}{noun}",
+        "center_x": spawn_cx,
+        "center_y": spawn_cy,
+        "radius":   radius,
+        "boundary": poly,
+    }]
+    centres.append((spawn_cx, spawn_cy))
+
+    attempts = 0
+    while len(towns) < TOWN_COUNT and attempts < 2000:
+        attempts += 1
+        cx = rng.randint(80, WORLD_W - 80)
+        cy = rng.randint(80, WORLD_H - 80)
+        if any(math.hypot(cx - ox, cy - oy) < TOWN_MIN_DIST for ox, oy in centres):
+            continue
+        radius  = rng.randint(TOWN_RADIUS_MIN, TOWN_RADIUS_MAX)
+        points  = rng.randint(10, 18)
+        poly    = _generate_polygon(cx, cy, radius, rng, points=points)
+        adj     = rng.choice(TOWN_ADJ)
+        noun    = rng.choice(TOWN_NOUN)
+        name    = f"{adj}{noun}"
+        # Avoid duplicate names
+        while any(t["name"] == name for t in towns):
+            adj  = rng.choice(TOWN_ADJ)
+            noun = rng.choice(TOWN_NOUN)
+            name = f"{adj}{noun}"
+        towns.append({"name": name, "center_x": cx, "center_y": cy, "radius": radius, "boundary": poly})
+        centres.append((cx, cy))
+
+    return towns
+
+
+def _generate_polygon(cx: int, cy: int, radius: int, rng: random.Random, points: int = 12) -> list[dict]:
+    """
+    Generate an irregular polygon around (cx, cy) with approximate radius.
+    Returns list of {x, y} dicts for JSON storage.
+    """
+    verts = []
+    for i in range(points):
+        angle  = (2 * math.pi * i / points) + rng.uniform(-0.2, 0.2)
+        r      = radius * rng.uniform(0.6, 1.4)
+        r      = max(20, min(r, radius * 1.5))
+        vx     = int(cx + math.cos(angle) * r)
+        vy     = int(cy + math.sin(angle) * r)
+        vx     = max(5, min(WORLD_W - 5, vx))
+        vy     = max(5, min(WORLD_H - 5, vy))
+        verts.append({"x": vx, "y": vy})
+    return verts
+
+
+def _point_in_polygon(x: float, y: float, poly: list[dict]) -> bool:
+    """Ray-cast point-in-polygon test."""
+    n = len(poly)
+    inside = False
+    j = n - 1
+    for i in range(n):
+        xi, yi = poly[i]["x"], poly[i]["y"]
+        xj, yj = poly[j]["x"], poly[j]["y"]
+        if ((yi > y) != (yj > y)) and (x < (xj - xi) * (y - yi) / (yj - yi) + xi):
+            inside = not inside
+        j = i
+    return inside
+
+
+def _find_town_for_point(x: int, y: int, towns: list[dict]) -> int | None:
+    """Return 0-based index of the town that contains (x,y), or None."""
+    for i, t in enumerate(towns):
+        if _point_in_polygon(x, y, t["boundary"]):
+            return i
+    return None
+
+# ---- Resource node generation -----------------------------------------------
+
+def _generate_nodes(rng: random.Random) -> list[dict]:
+    """
+    Scatter ~500 resource nodes across the world by biome.
+    Near spawn (±30 tiles) is always seeded with starter resources.
+    """
+    nodes: list[dict] = []
+    sx, sy = PLAYER_SPAWN
+
+    # Guaranteed starter resources — placed near the NPC shops (50-70 tiles from spawn)
+    # so new players have to travel a bit to find them.
+    for x, y, rtype, max_a, rate in [
+        (sx-55, sy-8, "manure",   100, 0.50),
+        (sx-52, sy+5, "manure",   100, 0.50),
+        (sx+52, sy-8, "manure",   100, 0.50),
+        (sx+55, sy+5, "manure",   100, 0.50),
+        (sx-50, sy+10, "gravel",  100, 0.30),
+        (sx+50, sy+10, "gravel",  100, 0.30),
+        (sx-5,  sy-58, "topsoil",  80, 0.40),
+        (sx+8,  sy-55, "compost",  80, 0.20),
+        (sx-5,  sy+55, "manure",  100, 0.50),
+        (sx+8,  sy+58, "gravel",  100, 0.30),
+    ]:
+        nodes.append({
+            "x": x, "y": y, "node_type": rtype,
+            "current_amount": round(max_a * 0.8, 1),
+            "max_amount": max_a, "replenish_rate": rate,
+        })
+
+    # Protected zone: keep the spawn tile clear so players start on an empty field
+    def near_spawn(x, y):
+        return abs(x - sx) <= 35 and abs(y - sy) <= 35
+
+    # Grid scatter: every ~25 tiles, 35% chance of a node
+    for gx in range(0, WORLD_W, 25):
+        for gy in range(0, WORLD_H, 25):
+            if rng.random() > 0.35:
+                continue
+            x = gx + rng.randint(0, 24)
+            y = gy + rng.randint(0, 24)
+            x = max(5, min(WORLD_W - 5, x))
+            y = max(5, min(WORLD_H - 5, y))
+            if near_spawn(x, y):
+                continue
+
+            biome   = _biome(x, y)
+            options = BIOME_RESOURCES[biome]
+            rtype, max_a, rate = rng.choice(options)
+
+            # Farther from spawn → lower current amount (depleted over time)
+            dist      = math.hypot(x - sx, y - sy)
+            freshness = max(0.3, 1.0 - dist / (WORLD_W * 0.6))
+
+            nodes.append({
+                "x": x, "y": y, "node_type": rtype,
+                "current_amount": round(max_a * 0.5 * freshness, 1),
+                "max_amount": max_a, "replenish_rate": rate,
+            })
+
+    return nodes
+
+# ---- Parcel generation ------------------------------------------------------
+
+def _generate_parcels(rng: random.Random, towns: list[dict],
+                      node_list: list[dict]) -> list[dict]:
+    """
+    Generate variable-size rectangular parcels within towns and in the wilderness.
+    Returns list of parcel dicts with town_idx (index into towns list, or None).
+    """
+    parcels: list[dict] = []
+    # Quick lookup: node positions → node data
+    node_map = {(n["x"], n["y"]): n for n in node_list}
+
+    # occupied[tx][ty] = True if tile is inside an existing parcel
+    occupied: set[tuple] = set()
+
+    # Protected tiles: don't place parcels over NPC shops / market / spawn
+    protected: set[tuple] = set()
+    for (px, py) in [MARKET_TILE, PLAYER_SPAWN] + list(NPC_SHOP_LOCATIONS.values()):
+        for dx in range(-3, 4):
+            for dy in range(-3, 4):
+                protected.add((px + dx, py + dy))
+
+    def _count_resources(x, y, w, h):
+        return sum(
+            1 for (nx, ny) in node_map
+            if x <= nx < x + w and y <= ny < y + h
+        )
+
+    def _try_place(x, y, w, h, town_idx):
+        if x < 5 or y < 5 or x + w > WORLD_W - 5 or y + h > WORLD_H - 5:
+            return None
+        tiles = frozenset((x + dx, y + dy) for dx in range(w) for dy in range(h))
+        if tiles & occupied:
+            return None
+        if tiles & protected:
+            return None
+        occupied.update(tiles)
+        rc    = _count_resources(x, y, w, h)
+        price = max(PARCEL_MIN_PRICE, w * h * PARCEL_PRICE_PER_TILE + rc * PARCEL_RESOURCE_BONUS)
+        return {
+            "x": x, "y": y, "w": w, "h": h,
+            "price": price, "town_idx": town_idx,
+        }
+
+    # Town parcels
+    for t_idx, town in enumerate(towns):
+        cx, cy, radius = town["center_x"], town["center_y"], town["radius"]
+        count  = rng.randint(*TOWN_PARCELS_PER_TOWN)
+        placed = 0
+        for _ in range(count * 8):   # max attempts
+            if placed >= count:
+                break
+            angle = rng.uniform(0, 2 * math.pi)
+            dist  = rng.uniform(3, radius * 0.85)
+            px    = int(cx + math.cos(angle) * dist)
+            py    = int(cy + math.sin(angle) * dist)
+            # Snap to tile grid, random size
+            w = rng.randint(*PARCEL_W_RANGE)
+            h = rng.randint(*PARCEL_H_RANGE)
+            p = _try_place(px - w // 2, py - h // 2, w, h, t_idx)
+            if p:
+                parcels.append(p)
+                placed += 1
+
+    # Wilderness parcels
+    wplaced = 0
+    for _ in range(WILDERNESS_PARCELS * 6):
+        if wplaced >= WILDERNESS_PARCELS:
+            break
+        x = rng.randint(10, WORLD_W - 25)
+        y = rng.randint(10, WORLD_H - 15)
+        w = rng.randint(PARCEL_W_RANGE[0], PARCEL_W_RANGE[1] - 3)
+        h = rng.randint(PARCEL_H_RANGE[0], PARCEL_H_RANGE[1] - 2)
+        p = _try_place(x, y, w, h, None)
+        if p:
+            parcels.append(p)
+            wplaced += 1
+
+    return parcels
+
+# ---- Main entry point -------------------------------------------------------
+
+async def generate_world_if_needed():
+    """
+    Called once at engine startup. Generates world content if not already done.
+    Safe to call multiple times (idempotent via world_gen_state).
+    """
+    if await queries.world_is_generated():
+        return
+
+    rng = random.Random(42)   # deterministic seed — same world every fresh install
+
+    print("[world_gen] Generating world...")
+
+    towns    = _place_towns(rng)
+    nodes    = _generate_nodes(rng)
+    parcels  = _generate_parcels(rng, towns, nodes)
+
+    town_ids = await queries.insert_towns_bulk(towns)
+    await queries.insert_nodes_bulk(nodes)
+    await queries.insert_parcels_bulk(parcels, town_ids)
+
+    await queries.mark_world_generated()
+    print(f"[world_gen] Done. {len(towns)} towns, {len(nodes)} nodes, {len(parcels)} parcels.")

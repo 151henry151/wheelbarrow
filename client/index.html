@@ -22,7 +22,13 @@
   <div id="game-screen" style="display:none">
     <canvas id="game"></canvas>
 
-    <!-- Main HUD (top-left) -->
+    <!-- HUD toggle indicator — always visible -->
+    <div id="hud-toggle">[H] open hud</div>
+
+    <!-- Current town indicator — shown when player is inside a town -->
+    <div id="town-info" style="display:none"></div>
+
+    <!-- Main HUD (top-left) — hidden by default, toggled with H -->
     <div id="hud">
       <div id="hud-season"></div>
       <div id="hud-coins">coins: <span id="hud-coins-val">0</span></div>
@@ -36,7 +42,7 @@
       <div id="hud-hint"></div>
     </div>
 
-    <!-- Wheelbarrow condition HUD (top-right, always visible) -->
+    <!-- Wheelbarrow condition HUD (top-right) — hidden by default, toggled with H -->
     <div id="hud-wb">
       <div class="wb-label">Wheelbarrow</div>
       <div class="wb-row"><span>Paint</span><div class="wb-bar-wrap"><div id="wb-paint-bar" class="wb-bar"></div></div><span id="wb-paint-val">100</span></div>
@@ -61,8 +67,15 @@
 
     <!-- Pile management overlay -->
     <div id="pile-menu" style="display:none">
-      <div id="pile-menu-title">Your resource pile</div>
+      <div id="pile-menu-title">Resource pile</div>
       <div id="pile-menu-items"></div>
+      <div class="build-menu-close">[Esc] close</div>
+    </div>
+
+    <!-- Town hall / governance overlay -->
+    <div id="town-menu" style="display:none">
+      <div id="town-menu-title">Town Hall</div>
+      <div id="town-menu-items"></div>
       <div class="build-menu-close">[Esc] close</div>
     </div>
 

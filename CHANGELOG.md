@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-04-16
+
+### Added
+- **Procedural world generation**: 1000×1000 tile world generated deterministically (seed 42) at first startup; never re-generated on restart; guarded by `world_gen_state` DB flag
+- **Biome system**: four biomes (forest, rocky, plains, wetland) determined by smooth sinusoidal noise; each biome produces different resource types with different rates
+- **~500 resource nodes** scattered via biome-aware grid, with freshness falloff — nodes farther from spawn start more depleted; guaranteed starter resources placed 50–70 tiles from spawn near NPC shops
+- **40 procedurally named towns** with irregular polygon boundaries (10–18 vertices, Voronoi-like shapes, radius 80–150 tiles); names generated from adjective+noun word lists
+- **~700 variable-size land parcels** (5–20 wide × 5–15 tall tiles); parcels near resource nodes cost more (`PARCEL_RESOURCE_BONUS = 150c` per node inside); wilderness parcels available outside towns
+- **Parcel purchase preview**: press `B` once to highlight the parcel under your feet and see its price; press `B` again to confirm; `Esc` cancels — no blind purchases
+- **Town boundary rendering**: polygon outlines drawn on the map in per-town colours with faint interior tint; town name label near each centre
+- **Town crossing notification**: notice bar announces the town name (and tax rate if non-zero) when the player crosses a town boundary; persistent `in: TownName` indicator shown at bottom-left while inside a town
+- **Town Hall building** (5000c + 50 stone + 50 wood + 100 dirt): establishes the player as town founder; enables town governance
+- **Town governance**: town founder/leader interact with Town Hall (`E`) to set tax rate (0–30%), rename the town (once, founder only), or withdraw from treasury
+- **Town sales tax**: configurable 0–30% tax applied to all player-to-player transactions (pile sales, player market trades) within a town that has a Town Hall; tax accumulates in the town treasury
+- **HUD hidden by default**: game starts with a bare field view; small `[H] open hud` indicator always visible at top-left; `H` key toggles the full HUD and WB condition panels
+- **Viewport culling**: tick broadcasts only send resource nodes and piles within 120 tiles of the player; all parcels and towns sent once at connection init
+
+### Changed
+- World expanded from 100×100 to 1000×1000 tiles; NPC market at (500, 560) — about 60 tiles south of spawn and not visible on screen at start
+- NPC shops moved to ~56 tiles from spawn: Seed Shop (556, 500), General Store (444, 500), Repair Shop (500, 444)
+- `land_parcels` table replaced by `world_parcels` with `x`, `y`, `w`, `h` columns for variable-size parcels; `town_id` FK ties parcels to towns
+- `buy_parcel` action now requires `parcel_id` parameter; player must be standing on the parcel
+- Parcel rendering completely rewritten: variable-size rectangles replace the old fixed 10×10 tile grid
+- Server tick no longer broadcasts parcel data; clients receive all parcels once at `init` and update incrementally via `parcel_update` / `parcel_bought` events
+- DB reset required (new schema, world content generated on first startup)
+
+### Fixed
+- Player username now preserved across tick updates (was being dropped since `_player_wire` omits it)
+
 ## [0.4.0] - 2026-04-15
 
 ### Added
