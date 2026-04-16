@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS resource_nodes (
     current_amount  FLOAT DEFAULT 0,
     max_amount      FLOAT NOT NULL,
     replenish_rate  FLOAT NOT NULL,
+    tree_variant    TINYINT UNSIGNED NOT NULL DEFAULT 0,
     last_tick       DATETIME DEFAULT CURRENT_TIMESTAMP,
     INDEX idx_position (x, y)
 );
@@ -103,6 +104,36 @@ CREATE TABLE IF NOT EXISTS resource_piles (
 
 -- Dirt road tiles (NPC districts + growth toward player structures)
 CREATE TABLE IF NOT EXISTS world_roads (
+    x INT NOT NULL,
+    y INT NOT NULL,
+    PRIMARY KEY (x, y)
+);
+
+-- Water (ponds / streams). Movement blocked unless a bridge covers the tile.
+CREATE TABLE IF NOT EXISTS water_tiles (
+    x INT NOT NULL,
+    y INT NOT NULL,
+    PRIMARY KEY (x, y)
+);
+
+-- Completed wooden bridges (walkable; tile no longer counts as water)
+CREATE TABLE IF NOT EXISTS bridge_tiles (
+    x INT NOT NULL,
+    y INT NOT NULL,
+    PRIMARY KEY (x, y)
+);
+
+-- In-progress bridge: pay coins once, then deposit wood until BRIDGE_WOOD_REQUIRED
+CREATE TABLE IF NOT EXISTS bridge_progress (
+    x INT NOT NULL,
+    y INT NOT NULL,
+    wood_deposited FLOAT NOT NULL DEFAULT 0,
+    coins_paid TINYINT NOT NULL DEFAULT 0,
+    PRIMARY KEY (x, y)
+);
+
+-- Farmland tiles that need 1 dirt delivered before tilling works
+CREATE TABLE IF NOT EXISTS poor_soil_tiles (
     x INT NOT NULL,
     y INT NOT NULL,
     PRIMARY KEY (x, y)

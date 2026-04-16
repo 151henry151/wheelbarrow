@@ -83,9 +83,33 @@ async def insert_nodes_bulk(nodes: list[dict]):
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             await cur.executemany(
-                "INSERT INTO resource_nodes (x,y,node_type,current_amount,max_amount,replenish_rate) VALUES (%s,%s,%s,%s,%s,%s)",
-                [(n["x"], n["y"], n["node_type"], n["current_amount"], n["max_amount"], n["replenish_rate"]) for n in nodes],
+                "INSERT INTO resource_nodes (x,y,node_type,current_amount,max_amount,replenish_rate,tree_variant) VALUES (%s,%s,%s,%s,%s,%s,%s)",
+                [
+                    (
+                        n["x"],
+                        n["y"],
+                        n["node_type"],
+                        n["current_amount"],
+                        n["max_amount"],
+                        n["replenish_rate"],
+                        int(n.get("tree_variant", 0) or 0),
+                    )
+                    for n in nodes
+                ],
             )
+
+
+async def ensure_resource_nodes_tree_variant():
+    """Add tree_variant for wild wood sprite variety (init.sql only runs on fresh DB)."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            try:
+                await cur.execute(
+                    "ALTER TABLE resource_nodes ADD COLUMN tree_variant TINYINT UNSIGNED NOT NULL DEFAULT 0",
+                )
+            except Exception:
+                pass
 
 # ---------------------------------------------------------------------------
 # Towns
@@ -279,6 +303,151 @@ async def save_structure(struct: dict):
                 "UPDATE structures SET inventory=%s, config=%s, last_tick=NOW() WHERE id=%s",
                 (json.dumps(struct.get("inventory", {})), json.dumps(struct.get("config", {})), struct["id"]),
             )
+
+
+async def delete_structure(struct_id: int):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("DELETE FROM structures WHERE id=%s", (struct_id,))
+
+
+async def ensure_terrain_tables():
+    """Water, bridges, poor soil — init.sql only runs on fresh DB volumes."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """CREATE TABLE IF NOT EXISTS water_tiles (
+                    x INT NOT NULL, y INT NOT NULL, PRIMARY KEY (x, y)
+                )""",
+            )
+            await cur.execute(
+                """CREATE TABLE IF NOT EXISTS bridge_tiles (
+                    x INT NOT NULL, y INT NOT NULL, PRIMARY KEY (x, y)
+                )""",
+            )
+            await cur.execute(
+                """CREATE TABLE IF NOT EXISTS bridge_progress (
+                    x INT NOT NULL, y INT NOT NULL,
+                    wood_deposited FLOAT NOT NULL DEFAULT 0,
+                    coins_paid TINYINT NOT NULL DEFAULT 0,
+                    PRIMARY KEY (x, y)
+                )""",
+            )
+            await cur.execute(
+                """CREATE TABLE IF NOT EXISTS poor_soil_tiles (
+                    x INT NOT NULL, y INT NOT NULL, PRIMARY KEY (x, y)
+                )""",
+            )
+
+
+async def count_water_tiles() -> int:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("SELECT COUNT(*) FROM water_tiles")
+            (n,) = await cur.fetchone()
+            return int(n or 0)
+
+
+async def insert_water_tiles_bulk(tiles: set[tuple[int, int]] | list[tuple[int, int]]):
+    if not tiles:
+        return
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.executemany(
+                "INSERT IGNORE INTO water_tiles (x, y) VALUES (%s, %s)",
+                list(tiles),
+            )
+
+
+async def delete_water_tile(x: int, y: int):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("DELETE FROM water_tiles WHERE x=%s AND y=%s", (x, y))
+
+
+async def load_all_water_tiles() -> list[tuple[int, int]]:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("SELECT x, y FROM water_tiles")
+            return [(r[0], r[1]) for r in await cur.fetchall()]
+
+
+async def insert_bridge_tile(x: int, y: int):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "INSERT IGNORE INTO bridge_tiles (x, y) VALUES (%s, %s)",
+                (x, y),
+            )
+
+
+async def load_all_bridge_tiles() -> list[tuple[int, int]]:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("SELECT x, y FROM bridge_tiles")
+            return [(r[0], r[1]) for r in await cur.fetchall()]
+
+
+async def upsert_bridge_progress(x: int, y: int, wood_deposited: float, coins_paid: int):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """INSERT INTO bridge_progress (x, y, wood_deposited, coins_paid)
+                   VALUES (%s, %s, %s, %s)
+                   ON DUPLICATE KEY UPDATE wood_deposited=%s, coins_paid=%s""",
+                (x, y, wood_deposited, coins_paid, wood_deposited, coins_paid),
+            )
+
+
+async def delete_bridge_progress(x: int, y: int):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("DELETE FROM bridge_progress WHERE x=%s AND y=%s", (x, y))
+
+
+async def load_all_bridge_progress() -> list[dict]:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor(aiomysql.DictCursor) as cur:
+            await cur.execute("SELECT x, y, wood_deposited, coins_paid FROM bridge_progress")
+            return await cur.fetchall()
+
+
+async def insert_poor_soil_bulk(tiles: set[tuple[int, int]] | list[tuple[int, int]]):
+    if not tiles:
+        return
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.executemany(
+                "INSERT IGNORE INTO poor_soil_tiles (x, y) VALUES (%s, %s)",
+                list(tiles),
+            )
+
+
+async def delete_poor_soil_tile(x: int, y: int):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("DELETE FROM poor_soil_tiles WHERE x=%s AND y=%s", (x, y))
+
+
+async def load_all_poor_soil_tiles() -> list[tuple[int, int]]:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("SELECT x, y FROM poor_soil_tiles")
+            return [(r[0], r[1]) for r in await cur.fetchall()]
 
 # ---------------------------------------------------------------------------
 # Resource piles

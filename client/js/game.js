@@ -60,6 +60,10 @@ const UPGRADE_COSTS = {
 };
 const WB_BUCKET_CAPS = {1:10, 2:16, 3:26, 4:40, 5:60, 6:85};
 
+// Mirrored from server/game/constants.py (bridge costs)
+const BRIDGE_COIN_COST = 30;
+const BRIDGE_WOOD_REQUIRED = 10;
+
 // Fallback if init sends no npc_markets (mirrors server MARKET_TILE)
 const NPC_MARKET_FALLBACK = { x: 500, y: 560 };
 
@@ -79,6 +83,9 @@ const state = {
   piles:        [],
   roads:        [],
   soil_tiles:   [],
+  water_tiles:  [],
+  bridge_tiles: [],
+  poor_soil_tiles: [],
   crops:        [],
   npc_markets:  [],
   npc_shops:    [],
@@ -158,6 +165,16 @@ function _townAt(x, y) {
 function _soilTilledAt(x, y) {
   const e = state.soil_tiles.find(t => t.x === x && t.y === y);
   return e ? e.tilled : 0;
+}
+
+function _poorSoilAt(x, y) {
+  return (state.poor_soil_tiles || []).some(t => t.x === x && t.y === y);
+}
+
+function _adjFromFacing(px, py, facing) {
+  const m = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
+  const d = m[facing] || [0, 1];
+  return { x: px + d[0], y: py + d[1] };
 }
 
 function _nearNpcMarket(px, py) {
@@ -284,6 +301,7 @@ function stopSellAutopilot(reason) {
   tw.forEach(fn => fn());
   if (reason === 'user') showNotice('Autopilot stopped.');
   else if (reason === 'complete') showNotice('Autopilot finished — stood by empty pile.');
+  // 'disconnect': silent — connection lost
 }
 
 async function runSellAutopilotLoop(rtype, hx, hy) {
@@ -470,16 +488,32 @@ function _updateHint() {
   if (atMarket && total > 0) hints.push('[Space] sell all at NPC market');
   if (total > 0) {
     hints.push('[U] unload (pile at your feet; wheat → silo if standing on one)');
-    const siteHere = state.nodes.find(
-      n => n.construction_active && n.x === px && n.y === py && n.owner_id === p.id,
-    );
-    if (siteHere) hints.push('[G] deliver barrow materials to this construction site');
     const siloHere = state.nodes.find(
       n => n.is_silo && n.x === px && n.y === py && n.owner_id === p.id,
     );
     if (siloHere && (siloHere.silo_wheat || 0) > 0) {
       hints.push('[O] withdraw wheat from silo to barrow');
     }
+  }
+
+  const siteHere = state.nodes.find(
+    n => n.construction_active && n.x === px && n.y === py && n.owner_id === p.id,
+  );
+  if (siteHere) {
+    if (total > 0) hints.push('[G] deliver barrow materials to this construction site');
+    else hints.push('[G] deliver materials when your barrow has stone, wood, etc.');
+    const c = siteHere.construction;
+    if (c) {
+      const parts = [];
+      for (const [k, v] of Object.entries(c.foundation_remaining || {})) {
+        if (v > 0) parts.push(`${k} ${(+v).toFixed(1)}`);
+      }
+      for (const [k, v] of Object.entries(c.building_remaining || {})) {
+        if (v > 0) parts.push(`${k} ${(+v).toFixed(1)}`);
+      }
+      if (parts.length) hints.push(`Construction still needs: ${parts.join(', ')}`);
+    }
+    hints.push('[X] cancel construction (refund deposited materials, not the start coins)');
   }
 
   const nearShop = state.npc_shops.find(s => Math.abs(s.x - px) <= 1 && Math.abs(s.y - py) <= 1);
@@ -534,10 +568,33 @@ function _updateHint() {
         : '[F] fertilize (barrow fertilizer or manure) / check crop');
     }
   } else if (parcel && parcel.owner_id === p.id) {
-    if (_soilTilledAt(px, py) === 1) {
+    if (_poorSoilAt(px, py)) {
+      if ((p.bucket || {}).dirt >= 1) {
+        hints.push('[I] spread 1 dirt to improve poor soil (required before tilling)');
+      } else {
+        hints.push('Poor soil — load dirt, then [I] here before you can till or plant');
+      }
+    } else if (_soilTilledAt(px, py) === 1) {
       hints.push('[F] plant wheat (tilled soil)');
     } else {
       hints.push('[F] till soil before planting');
+    }
+  }
+
+  const myStructHere = state.nodes.find(
+    n => n.is_structure && !n.construction_active && n.x === px && n.y === py && n.owner_id === p.id,
+  );
+  if (myStructHere && !myStructHere.is_town_hall) {
+    hints.push('[D] tear down building (partial material refund to piles)');
+  }
+
+  const adj = _adjFromFacing(px, py, state.facing);
+  const waterFacing = (state.water_tiles || []).some(t => t.x === adj.x && t.y === adj.y);
+  const parAdj = _parcelAt(adj.x, adj.y);
+  if (waterFacing) {
+    hints.push(`[J] bridge: pay ${BRIDGE_COIN_COST}c once per tile, then ${BRIDGE_WOOD_REQUIRED} wood total (facing water)`);
+    if ((p.bucket || {}).dirt >= 1 && parAdj && parAdj.owner_id === p.id) {
+      hints.push('[L] fill adjacent water with 1 dirt (your land only)');
     }
   }
 
@@ -883,6 +940,11 @@ function handleKey(key) {
   if (lk === 'p')  { openBuildMenu(); return; }
   if (lk === 'u')  { WS.send({ type: 'unload' }); return; }
   if (lk === 'g')  { WS.send({ type: 'deposit_build' }); return; }
+  if (lk === 'x')  { WS.send({ type: 'cancel_construction' }); return; }
+  if (lk === 'd')  { WS.send({ type: 'demolish_structure' }); return; }
+  if (lk === 'i')  { WS.send({ type: 'improve_soil' }); return; }
+  if (lk === 'l')  { WS.send({ type: 'fill_water', dir: state.facing }); return; }
+  if (lk === 'j')  { WS.send({ type: 'bridge_deposit', dir: state.facing }); return; }
   if (lk === 'o')  { WS.send({ type: 'silo_withdraw' }); return; }
   if (lk === 'f')  { WS.send({ type: 'farm' }); return; }
   if (lk === 'e')  { _contextInteract(); return; }
@@ -1004,11 +1066,15 @@ window.addEventListener('load', () => {
       state._otherFacing  = {};
       state._prevOtherPos = {};
       state._prevSelfPos  = { x: msg.player.x, y: msg.player.y };
+      state.players       = msg.players || [];
       state.nodes         = msg.nodes;
       state.world_parcels = msg.parcels || [];
       state.piles         = msg.piles   || [];
       state.roads         = msg.roads   || [];
       state.soil_tiles    = msg.soil_tiles || [];
+      state.water_tiles   = msg.water_tiles || [];
+      state.bridge_tiles  = msg.bridge_tiles || [];
+      state.poor_soil_tiles = msg.poor_soil_tiles || [];
       state.crops         = msg.crops   || [];
       state.towns         = msg.towns   || [];
       state.npc_markets   = msg.npc_markets || (msg.market ? [msg.market] : []);
@@ -1045,6 +1111,9 @@ window.addEventListener('load', () => {
       state.piles   = msg.piles  || [];
       state.roads   = msg.roads  || [];
       state.soil_tiles = msg.soil_tiles || [];
+      state.water_tiles = msg.water_tiles || [];
+      state.bridge_tiles = msg.bridge_tiles || [];
+      state.poor_soil_tiles = msg.poor_soil_tiles || [];
       state.crops   = msg.crops  || [];
       state.prices  = msg.prices;
       state.season  = msg.season;
@@ -1128,7 +1197,12 @@ window.addEventListener('load', () => {
       showNotice(msg.msg);
     });
 
-    WS.connect(token);
+    WS.connect(token, null, () => {
+      stopSellAutopilot('disconnect');
+      state.players = [];
+      state._otherFacing = {};
+      state._prevOtherPos = {};
+    });
 
     function loop(now) {
       Input.update(now);

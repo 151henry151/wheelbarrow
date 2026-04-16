@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-04-16
+
+### Changed
+- **Documentation**: update README (version, key bindings for construction/terrain, multiplayer visibility, project file list); align `pyproject.toml` project version with `VERSION`
+
+## [0.9.1] - 2026-04-16
+
+### Changed
+- **Other players’ wheelbarrows**: only players with an active WebSocket are included in `init` and tick payloads; on disconnect the client clears the other-players list so wheelbarrows do not linger on screen until reconnect
+
+## [0.9.0] - 2026-04-16
+
+### Added
+- **Construction**: `[X]` cancels an active site and returns deposited materials to piles (start coins not refunded); HUD and sprite show remaining foundation/building quantities
+- **Demolish**: `[D]` tears down a completed building on your tile (Town Hall excluded); partial refund to piles (75% stone/gravel/clay/dirt, 40% wood; other types use defaults); silo wheat and half of market inventory go to piles
+- **Terrain**: water tiles (ponds/streams), wooden bridges, and poor-soil parcel tiles; legacy worlds get water/poor-soil seeded once if tables were empty
+- **Movement**: deep water blocks travel until filled or bridged
+- **Poor soil**: some parcel tiles require `[I]` with 1 dirt before tilling; **fill water** `[L]` on your land with dirt (facing); **bridges** `[J]` toward water — coin cost plus wood deposit per tile (wilderness or your land; blocked on another player’s parcel)
+
+### Changed
+- **World gen**: ~2.5× more stone/gravel/clay/dirt nodes via an extra mineral scatter pass; water and poor-soil generation integrated with fresh installs
+
+## [0.8.1] - 2026-04-16
+
+### Added
+- **`resource_nodes.tree_variant`**: persisted tinyint for wild wood sprite choice (deciduous vs conifer families, eight shapes each); migration for existing databases
+- **Forest wood clusters**: procedural groves in forest biomes (deciduous and conifer stands), higher wood caps and replenish rates than the old scattered forest grid nodes
+
+### Changed
+- **`server/game/world_gen.py`**: remove wood from the generic biome grid in forests; add `_add_forest_clusters` with jittered positions and minimum spacing between groves
+- **`client/js/renderer.js`**: draw wild wood as varied tree sprites; draw **wood ground piles** as small log cross-sections (pile icon), not standing trees
+- **`server/game/engine.py`**: include `tree_variant` on node wire payloads for wood nodes
+
 ## [0.8.0] - 2026-04-16
 
 ### Added

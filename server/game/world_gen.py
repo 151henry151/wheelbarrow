@@ -3,14 +3,14 @@ Procedural world generation.
 
 Runs once at startup (guarded by world_gen_state.done). Generates:
   - 40 towns with organic, irregular polygon boundaries
-  - ~500 resource nodes distributed by biome
+  - resource nodes distributed by biome, plus clustered forest wood (tree variants)
   - ~700 land parcels of varying size and price
 """
 import math
 import random
 import json
 from server.game.constants import (
-    WORLD_W, WORLD_H,
+    WORLD_W, WORLD_H, MINERAL_NODE_TYPES,
     TOWN_ADJ, TOWN_NOUN, TOWN_COUNT, TOWN_MIN_DIST,
     TOWN_RADIUS_MIN, TOWN_RADIUS_MAX,
     PARCEL_W_RANGE, PARCEL_H_RANGE,
@@ -19,6 +19,7 @@ from server.game.constants import (
     PLAYER_SPAWN,
 )
 from server.game.town_npcs import place_npc_district
+from server.game.terrain_features import generate_water_features, generate_poor_soil_for_parcels
 from server.db import queries
 
 # ---- Biome helpers ----------------------------------------------------------
@@ -38,13 +39,21 @@ def _biome(x: int, y: int) -> str:
 
 
 BIOME_RESOURCES = {
-    "forest":  [("wood",    80,  0.04), ("dirt",   50, 0.06)],
+    # Wood is placed in forest *clusters* (_add_forest_clusters), not on the generic grid,
+    # so forests read as groves instead of a grid of identical nodes.
+    "forest":  [("dirt",   50, 0.06)],
     "rocky":   [("stone",  120,  0.02), ("gravel", 100, 0.03)],
     "plains":  [("dirt",    60,  0.07), ("topsoil", 80, 0.40)],
     # Manure is a byproduct of player-built Stables — not a wild resource.
     # Compost is a byproduct of player-built Compost Heaps — not a wild resource.
     "wetland": [("clay",   100,  0.05), ("topsoil", 60, 0.15)],
 }
+
+# Wild trees (forest clusters) — more abundant than the old scattered forest wood nodes.
+FOREST_WOOD_MAX = 118
+FOREST_WOOD_REPLENISH = 0.085
+FOREST_CLUSTER_TARGET = 92
+FOREST_CLUSTER_MIN_SPACING = 13
 
 # ---- Town placement ---------------------------------------------------------
 
@@ -161,39 +170,114 @@ def _find_town_for_point(x: int, y: int, towns: list[dict]) -> int | None:
 
 # ---- Resource node generation -----------------------------------------------
 
+def _add_forest_clusters(
+    rng: random.Random,
+    nodes: list[dict],
+    occupied: set[tuple[int, int]],
+    sx: int,
+    sy: int,
+    near_spawn,
+) -> None:
+    """
+    Place many wood nodes in forest biomes as irregular clusters (deciduous vs conifer stands).
+    Each tree gets a tree_variant (0–7 deciduous shapes, 8–15 conifer shapes).
+    """
+    cluster_centers: list[tuple[int, int]] = []
+    attempts = 0
+    max_attempts = 22000
+    while len(cluster_centers) < FOREST_CLUSTER_TARGET and attempts < max_attempts:
+        attempts += 1
+        cx = rng.randint(30, WORLD_W - 30)
+        cy = rng.randint(30, WORLD_H - 30)
+        if near_spawn(cx, cy):
+            continue
+        if _biome(cx, cy) != "forest":
+            continue
+        if any(
+            math.hypot(cx - ox, cy - oy) < FOREST_CLUSTER_MIN_SPACING
+            for ox, oy in cluster_centers
+        ):
+            continue
+
+        kind = rng.randint(0, 1)  # 0 = deciduous stand, 1 = conifer stand
+        radius = rng.randint(5, 9)
+        n_trees = rng.randint(6, 14)
+        placed = 0
+        t_attempts = 0
+        while placed < n_trees and t_attempts < n_trees * 30:
+            t_attempts += 1
+            dx = rng.randint(-radius, radius)
+            dy = rng.randint(-radius, radius)
+            if dx * dx + dy * dy > radius * radius:
+                continue
+            tx, ty = cx + dx, cy + dy
+            if tx < 8 or tx >= WORLD_W - 8 or ty < 8 or ty >= WORLD_H - 8:
+                continue
+            if near_spawn(tx, ty):
+                continue
+            if _biome(tx, ty) != "forest":
+                continue
+            if (tx, ty) in occupied:
+                continue
+            occupied.add((tx, ty))
+            variant = kind * 8 + rng.randint(0, 7)
+            dist = math.hypot(tx - sx, ty - sy)
+            freshness = max(0.42, 1.0 - dist / (WORLD_W * 0.52))
+            max_a = FOREST_WOOD_MAX * rng.uniform(0.92, 1.08)
+            rate = FOREST_WOOD_REPLENISH * rng.uniform(0.9, 1.1)
+            nodes.append({
+                "x": tx,
+                "y": ty,
+                "node_type": "wood",
+                "current_amount": round(max_a * rng.uniform(0.58, 0.92) * freshness, 1),
+                "max_amount": round(max_a, 1),
+                "replenish_rate": rate,
+                "tree_variant": variant,
+            })
+            placed += 1
+
+        if placed >= 4:
+            cluster_centers.append((cx, cy))
+
+
 def _generate_nodes(rng: random.Random) -> list[dict]:
     """
-    Scatter ~500 resource nodes across the world by biome.
-    Near spawn (±30 tiles) is always seeded with starter resources.
+    Scatter ~500 resource nodes across the world by biome, plus clustered forest wood.
+    Near spawn (±35 tiles) is always seeded with starter resources.
     """
     nodes: list[dict] = []
+    occupied: set[tuple[int, int]] = set()
     sx, sy = PLAYER_SPAWN
 
     # Guaranteed starter resources — placed near the NPC shops (50-70 tiles from spawn)
     # so new players have to travel a bit to find them.
     # Only truly wild resources here: wood, stone, gravel, clay, topsoil, dirt.
     # Manure (from Stable) and compost (from Compost Heap) are never wild.
-    for x, y, rtype, max_a, rate in [
-        (sx-55, sy-8,  "wood",    80, 0.04),
-        (sx-52, sy+5,  "stone",  120, 0.02),
-        (sx+52, sy-8,  "wood",    80, 0.04),
-        (sx+55, sy+5,  "gravel", 100, 0.03),
-        (sx-50, sy+10, "gravel", 100, 0.03),
-        (sx+50, sy+10, "clay",   100, 0.05),
-        (sx-5,  sy-58, "topsoil", 80, 0.40),
-        (sx+8,  sy-55, "stone",  120, 0.02),
-        (sx-5,  sy+55, "clay",   100, 0.05),
-        (sx+8,  sy+58, "dirt",    60, 0.07),
+    for x, y, rtype, max_a, rate, tv in [
+        (sx - 55, sy - 8,  "wood",    100, 0.07, 3),
+        (sx - 52, sy + 5,  "stone",  120, 0.02, 0),
+        (sx + 52, sy - 8,  "wood",    100, 0.07, 11),
+        (sx + 55, sy + 5,  "gravel", 100, 0.03, 0),
+        (sx - 50, sy + 10, "gravel", 100, 0.03, 0),
+        (sx + 50, sy + 10, "clay",   100, 0.05, 0),
+        (sx - 5,  sy - 58, "topsoil", 80, 0.40, 0),
+        (sx + 8,  sy - 55, "stone",  120, 0.02, 0),
+        (sx - 5,  sy + 55, "clay",   100, 0.05, 0),
+        (sx + 8,  sy + 58, "dirt",    60, 0.07, 0),
     ]:
+        occupied.add((x, y))
         nodes.append({
             "x": x, "y": y, "node_type": rtype,
             "current_amount": round(max_a * 0.8, 1),
             "max_amount": max_a, "replenish_rate": rate,
+            "tree_variant": tv,
         })
 
     # Protected zone: keep the spawn tile clear so players start on an empty field
     def near_spawn(x, y):
         return abs(x - sx) <= 35 and abs(y - sy) <= 35
+
+    _add_forest_clusters(rng, nodes, occupied, sx, sy, near_spawn)
 
     # Grid scatter: every ~25 tiles, 35% chance of a node
     for gx in range(0, WORLD_W, 25):
@@ -206,6 +290,8 @@ def _generate_nodes(rng: random.Random) -> list[dict]:
             y = max(5, min(WORLD_H - 5, y))
             if near_spawn(x, y):
                 continue
+            if (x, y) in occupied:
+                continue
 
             biome   = _biome(x, y)
             options = BIOME_RESOURCES[biome]
@@ -215,13 +301,55 @@ def _generate_nodes(rng: random.Random) -> list[dict]:
             dist      = math.hypot(x - sx, y - sy)
             freshness = max(0.3, 1.0 - dist / (WORLD_W * 0.6))
 
+            occupied.add((x, y))
             nodes.append({
                 "x": x, "y": y, "node_type": rtype,
                 "current_amount": round(max_a * 0.5 * freshness, 1),
                 "max_amount": max_a, "replenish_rate": rate,
+                "tree_variant": 0,
             })
 
+    _boost_mineral_nodes(rng, nodes, occupied, sx, sy, near_spawn)
+
     return nodes
+
+
+def _boost_mineral_nodes(
+    rng: random.Random,
+    nodes: list[dict],
+    occupied: set[tuple[int, int]],
+    sx: int,
+    sy: int,
+    near_spawn,
+) -> None:
+    """Add ~1.5× more stone/gravel/clay/dirt nodes on top of the grid pass (~2.5× total vs grid-only)."""
+    count = sum(1 for n in nodes if n["node_type"] in MINERAL_NODE_TYPES)
+    extra = int(count * 1.5)
+    placed = 0
+    attempts = 0
+    while placed < extra and attempts < max(extra * 50, 5000):
+        attempts += 1
+        x = rng.randint(8, WORLD_W - 9)
+        y = rng.randint(8, WORLD_H - 9)
+        if near_spawn(x, y):
+            continue
+        if (x, y) in occupied:
+            continue
+        biome = _biome(x, y)
+        opts = [o for o in BIOME_RESOURCES[biome] if o[0] in MINERAL_NODE_TYPES]
+        if not opts:
+            continue
+        rtype, max_a, rate = rng.choice(opts)
+        dist = math.hypot(x - sx, y - sy)
+        freshness = max(0.3, 1.0 - dist / (WORLD_W * 0.6))
+        occupied.add((x, y))
+        nodes.append({
+            "x": x, "y": y, "node_type": rtype,
+            "current_amount": round(max_a * 0.5 * freshness, 1),
+            "max_amount": max_a, "replenish_rate": rate,
+            "tree_variant": 0,
+        })
+        placed += 1
 
 # ---- Parcel generation ------------------------------------------------------
 
@@ -335,5 +463,15 @@ async def generate_world_if_needed():
     await queries.insert_nodes_bulk(nodes)
     await queries.insert_parcels_bulk(parcels, town_ids)
 
+    await queries.ensure_terrain_tables()
+    node_pos = {(n["x"], n["y"]) for n in nodes}
+    water = generate_water_features(rng, node_pos, towns)
+    await queries.insert_water_tiles_bulk(water)
+    poor = generate_poor_soil_for_parcels(rng, parcels)
+    await queries.insert_poor_soil_bulk(poor)
+
     await queries.mark_world_generated()
-    print(f"[world_gen] Done. {len(towns)} towns, {len(nodes)} nodes, {len(parcels)} parcels.")
+    print(
+        f"[world_gen] Done. {len(towns)} towns, {len(nodes)} nodes, {len(parcels)} parcels, "
+        f"{len(water)} water tiles, {len(poor)} poor-soil tiles.",
+    )

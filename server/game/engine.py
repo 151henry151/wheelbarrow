@@ -1,7 +1,8 @@
 """
 In-memory game state. All mutation happens here; the DB handles persistence.
 
-v0.8.0: broken-handle half capacity, bucket_cap_effective; v0.7.0: staged construction, silos, winter spoilage;
+v0.9.0: water/bridges/poor soil, cancel/demolish, mineral boost; v0.8.0: broken-handle half capacity;
+v0.7.0: staged construction, silos, winter spoilage;
 worlds are 1000×1000;
 towns have polygon boundaries; transactions carry town taxes.
 """
@@ -21,6 +22,7 @@ from server.game.constants import (
     PILE_COLLECTION_MULT,
     ROAD_GROWTH_TILES_MIN, ROAD_GROWTH_TILES_MAX,
     MARKET_TILE, STRUCTURE_DEFS, MARKET_BASE_PRICES, WINTER_PILE_SPOIL_TYPES,
+    BRIDGE_COIN_COST, BRIDGE_WOOD_REQUIRED, DEMOLISH_REFUND_RATE,
     MARKET_DRIFT_INTERVAL, MARKET_DRIFT_THRESHOLD,
     NPC_SHOP_LOCATIONS, NPC_SHOP_LABELS, NPC_SHOP_ADJACENCY,
     SEED_SHOP_ITEMS, CROP_DEFS,
@@ -109,6 +111,12 @@ def _at_any_npc_market(player: dict, towns: dict[int, dict]) -> bool:
             return True
     return (px, py) == MARKET_TILE
 
+def _dir_offset(direction: str) -> tuple[int, int]:
+    return {"up": (0, -1), "down": (0, 1), "left": (-1, 0), "right": (1, 0)}.get(
+        (direction or "down").lower(), (0, 1),
+    )
+
+
 def _point_in_polygon(x: float, y: float, poly: list[dict]) -> bool:
     n = len(poly)
     inside = False
@@ -142,6 +150,10 @@ class GameEngine:
         # Soil: (x,y) -> 1 tilled (ready for seeds), 0 untilled / needs till
         self.soil: dict[tuple[int, int], int] = {}
         self.road_tiles: set[tuple[int, int]] = set()
+        self.water_tiles: set[tuple[int, int]] = set()
+        self.bridge_tiles: set[tuple[int, int]] = set()
+        self.poor_soil: set[tuple[int, int]] = set()
+        self.bridge_progress: dict[tuple[int, int], dict] = {}
         self.prices: dict[str, float] = {}
         self.sales_volume: dict[str, float] = {r: 0.0 for r in MARKET_BASE_PRICES}
         self.season = SeasonClock()
@@ -154,6 +166,7 @@ class GameEngine:
     # ------------------------------------------------------------------ load
 
     async def load(self):
+        await queries.ensure_resource_nodes_tree_variant()
         # World generation first (no-op if already done)
         from server.game.world_gen import generate_world_if_needed
         await generate_world_if_needed()
@@ -199,6 +212,29 @@ class GameEngine:
             self.soil[(int(row["x"]), int(row["y"]))] = int(row["tilled"])
         for crop in await queries.load_all_crops():
             self.crops[(crop["x"], crop["y"])] = dict(crop)
+
+        await queries.ensure_terrain_tables()
+        if await queries.count_water_tiles() == 0 and await queries.world_is_generated():
+            from server.game.terrain_features import generate_water_features, generate_poor_soil_for_parcels
+
+            rng = random.Random(991)
+            node_pos = {(n["x"], n["y"]) for n in self.nodes.values()}
+            water = generate_water_features(rng, node_pos, list(self.towns.values()))
+            await queries.insert_water_tiles_bulk(water)
+            self.water_tiles = set(water)
+            poor = generate_poor_soil_for_parcels(rng, list(self.world_parcels.values()))
+            await queries.insert_poor_soil_bulk(poor)
+            self.poor_soil = set(poor)
+        else:
+            self.water_tiles = set(await queries.load_all_water_tiles())
+            self.poor_soil = set(await queries.load_all_poor_soil_tiles())
+        self.bridge_tiles = set(await queries.load_all_bridge_tiles())
+        self.bridge_progress = {}
+        for row in await queries.load_all_bridge_progress():
+            self.bridge_progress[(int(row["x"]), int(row["y"]))] = {
+                "wood_deposited": float(row["wood_deposited"]),
+                "coins_paid": int(row["coins_paid"]),
+            }
 
         await queries.ensure_world_roads_table()
         await queries.migrate_resource_piles_parcel_optional()
@@ -392,6 +428,13 @@ class GameEngine:
         pid = self.parcel_at.get((player["x"], player["y"]))
         return self.world_parcels.get(pid) if pid else None
 
+    def _parcel_owning_tile(self, x: int, y: int) -> Optional[dict]:
+        pid = self.parcel_at.get((x, y))
+        return self.world_parcels.get(pid) if pid else None
+
+    def _terrain_allows_move(self, x: int, y: int) -> bool:
+        return (x, y) not in self.water_tiles
+
     def _get_player_town(self, player: dict) -> Optional[dict]:
         """Return the town the player is currently in, or None."""
         x, y = player["x"], player["y"]
@@ -476,6 +519,11 @@ class GameEngine:
         elif t == "market_trade":   await self._market_trade(player_id, msg.get("action"), msg.get("resource_type"), msg.get("amount"))
         elif t == "town_action":    await self._town_action(player_id, msg)
         elif t == "vote":           await self._vote(player_id, msg.get("candidate_id"))
+        elif t == "cancel_construction": await self._cancel_construction(player_id)
+        elif t == "demolish_structure":  await self._demolish_structure(player_id)
+        elif t == "improve_soil":       await self._improve_soil(player_id)
+        elif t == "fill_water":        await self._fill_water(player_id, msg.get("dir"))
+        elif t == "bridge_deposit":    await self._bridge_deposit(player_id, msg.get("dir"))
 
     # ---- movement -----------------------------------------------------------
 
@@ -488,6 +536,9 @@ class GameEngine:
             return
         nx, ny = player["x"] + dx, player["y"] + dy
         if not (0 <= nx < WORLD_W and 0 <= ny < WORLD_H):
+            return
+        if not self._terrain_allows_move(nx, ny):
+            asyncio.ensure_future(self._send(player_id, {"type": "notice", "msg": "Water blocks the way — fill it on your land ([L]) or build a bridge ([J]) over it."}))
             return
         player["x"], player["y"] = nx, ny
         events = apply_move_decay(player)
@@ -580,6 +631,9 @@ class GameEngine:
                 return
 
         tx, ty = player["x"], player["y"]
+        if (tx, ty) in self.water_tiles:
+            await self._send(player_id, {"type": "notice", "msg": "Can't build on water — fill it or bridge it first."})
+            return
         for n in {**self.nodes, **self.structures}.values():
             if n["x"] == tx and n["y"] == ty:
                 await self._send(player_id, {"type": "notice", "msg": "Something is already here."})
@@ -689,6 +743,221 @@ class GameEngine:
             "coins":     player["coins"] if player else 0,
             "msg":       done_msg,
         })
+
+    async def _refund_materials_to_piles(
+        self, player_id: int, tx: int, ty: int, materials: dict[str, float],
+    ) -> None:
+        if not materials:
+            return
+        pid_at = self.parcel_at.get((tx, ty))
+        parcel = self.world_parcels.get(pid_at) if pid_at else None
+        parcel_id = parcel["id"] if parcel else None
+        key = (tx, ty)
+        self.piles.setdefault(key, {})
+        for rtype, amt in materials.items():
+            try:
+                a = float(amt)
+            except (TypeError, ValueError):
+                continue
+            if a <= 0:
+                continue
+            existing = self.piles[key].get(rtype, {})
+            new_amt = round(existing.get("amount", 0) + a, 2)
+            pile_row = await queries.upsert_pile(
+                parcel_id, player_id, tx, ty, rtype, new_amt, existing.get("sell_price"),
+            )
+            self.piles[key][rtype] = dict(pile_row)
+
+    async def _cancel_construction(self, player_id: int):
+        player = self.players.get(player_id)
+        if not player:
+            return
+        tx, ty = player["x"], player["y"]
+        node = next((n for n in self.structures.values() if n["x"] == tx and n["y"] == ty), None)
+        if not node or not node.get("construction_active"):
+            await self._send(player_id, {"type": "notice", "msg": "No active construction site here."})
+            return
+        if node.get("owner_id") != player_id:
+            await self._send(player_id, {"type": "notice", "msg": "Not your construction site."})
+            return
+        cons = (node.get("config") or {}).get("construction") or {}
+        deposited = cons.get("deposited") or {}
+        sid = node["id"]
+        await queries.delete_structure(sid)
+        del self.structures[sid]
+        refund = {k: float(v) for k, v in deposited.items() if float(v) > 0}
+        await self._refund_materials_to_piles(player_id, tx, ty, refund)
+        await self._send(player_id, {
+            "type": "notice",
+            "msg": "Construction cancelled — deposited materials returned to a pile here (init coins not refunded).",
+        })
+
+    async def _demolish_structure(self, player_id: int):
+        player = self.players.get(player_id)
+        if not player:
+            return
+        tx, ty = player["x"], player["y"]
+        node = next((n for n in self.structures.values() if n["x"] == tx and n["y"] == ty), None)
+        if not node:
+            await self._send(player_id, {"type": "notice", "msg": "Nothing built here."})
+            return
+        if node.get("construction_active"):
+            await self._send(player_id, {"type": "notice", "msg": "Use cancel ([X]) while the site is under construction."})
+            return
+        if node.get("owner_id") != player_id:
+            await self._send(player_id, {"type": "notice", "msg": "Not your building."})
+            return
+        stype = node.get("structure_type")
+        if stype == "town_hall":
+            await self._send(player_id, {"type": "notice", "msg": "Town Hall can't be torn down."})
+            return
+        sdef = STRUCTURE_DEFS.get(stype or "", {})
+        cons = sdef.get("construction") or {}
+        fd = cons.get("foundation") or {}
+        bd = cons.get("building") or {}
+        refund: dict[str, float] = {}
+        for k, v in {**fd, **bd}.items():
+            try:
+                req = float(v)
+            except (TypeError, ValueError):
+                continue
+            if req <= 0:
+                continue
+            rate = float(DEMOLISH_REFUND_RATE.get(k, 0.5))
+            amt = round(req * rate, 2)
+            if amt > 0:
+                refund[k] = refund.get(k, 0) + amt
+        if node.get("is_silo"):
+            inv = node.get("inventory") or {}
+            w = float(inv.get("wheat", 0) or 0)
+            if w > 0:
+                refund["wheat"] = refund.get("wheat", 0) + w
+        if node.get("is_market"):
+            inv = node.get("inventory") or {}
+            for k, v in inv.items():
+                a = float(v or 0) * 0.5
+                if a > 0:
+                    refund[k] = refund.get(k, 0) + round(a, 2)
+        sid = node["id"]
+        await queries.delete_structure(sid)
+        del self.structures[sid]
+        await self._refund_materials_to_piles(player_id, tx, ty, refund)
+        await self._send(player_id, {
+            "type": "notice",
+            "msg": "Building torn down — a partial refund was dropped in piles here (stone-heavy materials refund more than wood).",
+        })
+
+    async def _improve_soil(self, player_id: int):
+        player = self.players.get(player_id)
+        if not player:
+            return
+        tx, ty = player["x"], player["y"]
+        parcel = self._get_player_parcel(player)
+        if not parcel or parcel.get("owner_id") != player_id:
+            await self._send(player_id, {"type": "notice", "msg": "Stand on your own land to improve soil."})
+            return
+        if (tx, ty) not in self.poor_soil:
+            await self._send(player_id, {"type": "notice", "msg": "This tile doesn't need dirt."})
+            return
+        bucket = player.setdefault("bucket", {})
+        if float(bucket.get("dirt", 0) or 0) < 1:
+            await self._send(player_id, {"type": "notice", "msg": "Need at least 1 dirt in your barrow."})
+            return
+        bucket["dirt"] = round(bucket["dirt"] - 1, 2)
+        if bucket["dirt"] <= 0:
+            del bucket["dirt"]
+        self.poor_soil.discard((tx, ty))
+        await queries.delete_poor_soil_tile(tx, ty)
+        await queries.save_player(player)
+        await self._send(player_id, {"type": "notice", "msg": "Soil improved — you can till this tile now."})
+
+    async def _fill_water(self, player_id: int, direction: str | None):
+        player = self.players.get(player_id)
+        if not player:
+            return
+        dx, dy = _dir_offset(direction or "down")
+        px, py = player["x"], player["y"]
+        wx, wy = px + dx, py + dy
+        parcel = self._get_player_parcel(player)
+        if not parcel or parcel.get("owner_id") != player_id:
+            await self._send(player_id, {"type": "notice", "msg": "Stand on your own land to landfill water next to you."})
+            return
+        wpar = self._parcel_owning_tile(wx, wy)
+        if not wpar or wpar.get("id") != parcel.get("id") or wpar.get("owner_id") != player_id:
+            await self._send(player_id, {"type": "notice", "msg": "You can only fill water tiles on your own parcel."})
+            return
+        if (wx, wy) not in self.water_tiles:
+            await self._send(player_id, {"type": "notice", "msg": "No water there."})
+            return
+        bucket = player.setdefault("bucket", {})
+        if float(bucket.get("dirt", 0) or 0) < 1:
+            await self._send(player_id, {"type": "notice", "msg": "Need 1 dirt in your barrow to fill this tile."})
+            return
+        bucket["dirt"] = round(bucket["dirt"] - 1, 2)
+        if bucket["dirt"] <= 0:
+            del bucket["dirt"]
+        self.water_tiles.discard((wx, wy))
+        await queries.delete_water_tile(wx, wy)
+        await queries.save_player(player)
+        await self._send(player_id, {"type": "notice", "msg": "Filled in water with dirt."})
+
+    async def _bridge_deposit(self, player_id: int, direction: str | None):
+        player = self.players.get(player_id)
+        if not player:
+            return
+        dx, dy = _dir_offset(direction or "down")
+        px, py = player["x"], player["y"]
+        wx, wy = px + dx, py + dy
+        if (wx, wy) not in self.water_tiles:
+            await self._send(player_id, {"type": "notice", "msg": "No water in that direction."})
+            return
+        par = self._parcel_owning_tile(wx, wy)
+        if par and par.get("owner_id") and par.get("owner_id") != player_id:
+            await self._send(player_id, {"type": "notice", "msg": "Can't build a bridge over another player's land."})
+            return
+        key = (wx, wy)
+        prog = self.bridge_progress.get(key, {"wood_deposited": 0.0, "coins_paid": 0})
+        wood_dep = float(prog.get("wood_deposited", 0) or 0)
+        coins_paid = int(prog.get("coins_paid", 0) or 0)
+        if not coins_paid:
+            if player["coins"] < BRIDGE_COIN_COST:
+                await self._send(player_id, {"type": "notice", "msg": f"Need {BRIDGE_COIN_COST}c to start this bridge section."})
+                return
+            player["coins"] -= BRIDGE_COIN_COST
+            coins_paid = 1
+        bucket = player.setdefault("bucket", {})
+        wood_avail = float(bucket.get("wood", 0) or 0)
+        need = max(0.0, BRIDGE_WOOD_REQUIRED - wood_dep)
+        take = min(wood_avail, need)
+        if take <= 0:
+            await queries.save_player(player)
+            await queries.upsert_bridge_progress(wx, wy, wood_dep, coins_paid)
+            self.bridge_progress[key] = {"wood_deposited": wood_dep, "coins_paid": coins_paid}
+            await self._send(player_id, {
+                "type": "notice",
+                "msg": f"Bridge site: {round(wood_dep, 1)}/{BRIDGE_WOOD_REQUIRED} wood — add wood from your barrow (facing the water tile).",
+            })
+            return
+        bucket["wood"] = round(wood_avail - take, 2)
+        if bucket["wood"] <= 0:
+            del bucket["wood"]
+        wood_dep = round(wood_dep + take, 2)
+        await queries.save_player(player)
+        if wood_dep >= BRIDGE_WOOD_REQUIRED:
+            self.water_tiles.discard(key)
+            await queries.delete_water_tile(wx, wy)
+            self.bridge_tiles.add(key)
+            await queries.insert_bridge_tile(wx, wy)
+            await queries.delete_bridge_progress(wx, wy)
+            self.bridge_progress.pop(key, None)
+            await self._send(player_id, {"type": "notice", "msg": "Bridge complete — you can cross this tile."})
+        else:
+            await queries.upsert_bridge_progress(wx, wy, wood_dep, coins_paid)
+            self.bridge_progress[key] = {"wood_deposited": wood_dep, "coins_paid": coins_paid}
+            await self._send(player_id, {
+                "type": "notice",
+                "msg": f"Bridge: {round(wood_dep, 1)}/{BRIDGE_WOOD_REQUIRED} wood (need {round(BRIDGE_WOOD_REQUIRED - wood_dep, 1)} more).",
+            })
 
     async def _silo_withdraw(self, player_id: int):
         player = self.players.get(player_id)
@@ -1008,6 +1277,10 @@ class GameEngine:
             if not parcel or parcel.get("owner_id") != player_id:
                 await self._send(player_id, {"type": "notice", "msg": "Not your land."})
                 return
+            if (tx, ty) in self.poor_soil:
+                await self._send(player_id, {"type": "notice",
+                    "msg": "Poor soil — deposit 1 dirt here ([I]) before you can till away the stubble."})
+                return
             await queries.harvest_crop(crop["id"])
             del self.crops[(tx, ty)]
             await queries.upsert_soil_tile(tx, ty, 1)
@@ -1108,6 +1381,11 @@ class GameEngine:
             await queries.upsert_soil_tile(tx, ty, 0)
             self.soil[(tx, ty)] = 0
             await self._send(player_id, {"type": "notice", "msg": "Planted wheat! Ready in ~20 min."})
+            return
+
+        if (tx, ty) in self.poor_soil:
+            await self._send(player_id, {"type": "notice",
+                "msg": "This soil is poor — press [I] with at least 1 dirt in your barrow to improve the tile, then till."})
             return
 
         await queries.upsert_soil_tile(tx, ty, 1)
@@ -1502,14 +1780,18 @@ class GameEngine:
                 await queries.update_town(town)
                 await self._broadcast_all({"type": "town_update", "town": self._town_wire(town)})
 
-    async def _broadcast_state(self):
-        if not self.sockets:
-            return
-        all_players  = [
+    def _connected_players_wire(self) -> list[dict]:
+        """Other clients only need wheelbarrows for players with an active WebSocket."""
+        return [
             {"id": p["id"], "username": p["username"], "x": p["x"], "y": p["y"],
              "flat_tire": p.get("flat_tire", 0)}
             for p in self.players.values() if p["id"] in self.sockets
         ]
+
+    async def _broadcast_state(self):
+        if not self.sockets:
+            return
+        all_players = self._connected_players_wire()
         all_structs  = [self._node_wire(n) for n in self.structures.values()]
 
         for pid, ws in list(self.sockets.items()):
@@ -1538,6 +1820,9 @@ class GameEngine:
                 if abs(rx - px) <= VIEWPORT_RADIUS and abs(ry - py) <= VIEWPORT_RADIUS
             ]
             nearby_soil = self._nearby_soil_tiles(px, py)
+            nearby_water = self._nearby_water_tiles(px, py)
+            nearby_bridges = self._nearby_bridge_tiles(px, py)
+            nearby_poor = self._nearby_poor_soil_tiles(px, py)
             try:
                 await ws.send_json({
                     "type":       "tick",
@@ -1548,6 +1833,9 @@ class GameEngine:
                     "crops":      nearby_crops,
                     "roads":      nearby_roads,
                     "soil_tiles": nearby_soil,
+                    "water_tiles": nearby_water,
+                    "bridge_tiles": nearby_bridges,
+                    "poor_soil_tiles": nearby_poor,
                     "prices":     self.prices,
                     "season":     self.season.wire(),
                 })
@@ -1621,6 +1909,8 @@ class GameEngine:
             cap = float(STRUCTURE_DEFS.get(st or "", {}).get("silo_capacity", 0) or 0)
             out["silo_wheat"] = round(float(inv.get("wheat", 0) or 0), 1)
             out["silo_capacity"] = cap
+        if n.get("node_type") == "wood" and not n.get("is_structure"):
+            out["tree_variant"] = int(n.get("tree_variant") or 0)
         return out
 
     def _parcel_wire(self, p: dict) -> dict:
@@ -1702,6 +1992,27 @@ class GameEngine:
                 out.append({"x": sx, "y": sy, "tilled": int(tv)})
         return out
 
+    def _nearby_water_tiles(self, px: int, py: int) -> list[dict]:
+        return [
+            {"x": x, "y": y}
+            for (x, y) in self.water_tiles
+            if abs(x - px) <= VIEWPORT_RADIUS and abs(y - py) <= VIEWPORT_RADIUS
+        ]
+
+    def _nearby_bridge_tiles(self, px: int, py: int) -> list[dict]:
+        return [
+            {"x": x, "y": y}
+            for (x, y) in self.bridge_tiles
+            if abs(x - px) <= VIEWPORT_RADIUS and abs(y - py) <= VIEWPORT_RADIUS
+        ]
+
+    def _nearby_poor_soil_tiles(self, px: int, py: int) -> list[dict]:
+        return [
+            {"x": x, "y": y}
+            for (x, y) in self.poor_soil
+            if abs(x - px) <= VIEWPORT_RADIUS and abs(y - py) <= VIEWPORT_RADIUS
+        ]
+
     def full_state(self, player_id: int) -> dict:
         player = self.players[player_id]
         px, py = player["x"], player["y"]
@@ -1721,14 +2032,21 @@ class GameEngine:
             if abs(rx - px) <= VIEWPORT_RADIUS and abs(ry - py) <= VIEWPORT_RADIUS
         ]
         nearby_soil = self._nearby_soil_tiles(px, py)
+        nearby_water = self._nearby_water_tiles(px, py)
+        nearby_bridges = self._nearby_bridge_tiles(px, py)
+        nearby_poor = self._nearby_poor_soil_tiles(px, py)
         return {
             "type":    "init",
             "player":  self._player_wire(player),
+            "players": self._connected_players_wire(),
             "nodes":   nearby_nodes + [self._node_wire(n) for n in self.structures.values()],
             "parcels": [self._parcel_wire(p) for p in self.world_parcels.values()],
             "piles":   nearby_piles,
             "roads":   nearby_roads,
             "soil_tiles": nearby_soil,
+            "water_tiles": nearby_water,
+            "bridge_tiles": nearby_bridges,
+            "poor_soil_tiles": nearby_poor,
             "crops":       [self._crop_wire(c) for c in self.crops.values()],
             "npc_markets": self._all_npc_markets_wire(),
             "npc_shops":   self._all_npc_shops_wire(),

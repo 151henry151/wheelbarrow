@@ -255,6 +255,19 @@ WILDERNESS_PARCELS    = 200        # parcels outside any town
 # Nodes/piles/crops sent per tick only within this radius of the player
 VIEWPORT_RADIUS = 120
 
+# Wild resource grid: extra scatter pass targets these (~2.5× vs single-pass baseline)
+MINERAL_NODE_TYPES = frozenset({"stone", "gravel", "clay", "dirt"})
+
+# Wooden bridge over water (wilderness or your land — not another player’s parcel)
+BRIDGE_COIN_COST = 30
+BRIDGE_WOOD_REQUIRED = 10.0
+
+# Tear down completed structures — refund fractions into piles at the tile
+DEMOLISH_REFUND_RATE = {
+    "stone": 0.75, "gravel": 0.75, "clay": 0.75, "dirt": 0.75,
+    "wood": 0.40, "topsoil": 0.50, "manure": 0.50, "compost": 0.50,
+}
+
 # ---- Market -----------------------------------------------------------------
 MARKET_BASE_PRICES = {
     "manure": 5.0, "gravel": 3.0, "topsoil": 3.0, "compost": 4.0,

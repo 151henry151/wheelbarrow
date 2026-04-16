@@ -37,6 +37,9 @@ const Renderer = (() => {
     ctx.save();
     ctx.translate(-_camX, -_camY);
     _drawTiles(_camX, _camY, W, H);
+    _drawWater();
+    _drawBridges();
+    _drawPoorSoilMarkers();
     _drawTowns();
     _drawParcels();
     _drawRoads();
@@ -74,6 +77,47 @@ const Renderer = (() => {
     if (tint) {
       ctx.fillStyle = tint;
       ctx.fillRect(camX, camY, W, H);
+    }
+  }
+
+  function _drawWater() {
+    for (const w of (s.water_tiles || [])) {
+      const ox = w.x * T, oy = w.y * T;
+      if (ox < _camX - T || ox > _camX + _vpW + T || oy < _camY - T || oy > _camY + _vpH + T) continue;
+      ctx.fillStyle = 'rgba(28, 92, 160, 0.5)';
+      ctx.fillRect(ox, oy, T, T);
+      ctx.strokeStyle = 'rgba(18, 60, 110, 0.35)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(ox + 0.5, oy + 0.5, T - 1, T - 1);
+    }
+  }
+
+  function _drawBridges() {
+    for (const b of (s.bridge_tiles || [])) {
+      const ox = b.x * T, oy = b.y * T;
+      if (ox < _camX - T || ox > _camX + _vpW + T || oy < _camY - T || oy > _camY + _vpH + T) continue;
+      ctx.fillStyle = 'rgba(110, 82, 52, 0.9)';
+      ctx.fillRect(ox + 1, oy + 5, T - 2, T - 10);
+      ctx.strokeStyle = 'rgba(60, 44, 28, 0.95)';
+      ctx.lineWidth = 1;
+      for (let i = 0; i < 5; i++) {
+        ctx.beginPath();
+        ctx.moveTo(ox + 4 + i * 6, oy + 7);
+        ctx.lineTo(ox + 4 + i * 6, oy + T - 7);
+        ctx.stroke();
+      }
+    }
+  }
+
+  function _drawPoorSoilMarkers() {
+    ctx.lineWidth = 1.2;
+    for (const p of (s.poor_soil_tiles || [])) {
+      const ox = p.x * T, oy = p.y * T;
+      if (ox < _camX - T || ox > _camX + _vpW + T || oy < _camY - T || oy > _camY + _vpH + T) continue;
+      ctx.strokeStyle = 'rgba(160, 110, 55, 0.5)';
+      ctx.setLineDash([4, 4]);
+      ctx.strokeRect(ox + 2, oy + 2, T - 4, T - 4);
+      ctx.setLineDash([]);
     }
   }
 
@@ -277,6 +321,20 @@ const Renderer = (() => {
       if (node.construction_active) {
         _constructionSite(nx, ny);
         _label(nx + T/2, ny - 3, 'Building…', '#aab0c8', '7px monospace');
+        const cons = node.construction;
+        if (cons) {
+          const parts = [];
+          for (const [k, v] of Object.entries(cons.foundation_remaining || {})) {
+            if (v > 0) parts.push(`${k} ${(+v).toFixed(1)}`);
+          }
+          for (const [k, v] of Object.entries(cons.building_remaining || {})) {
+            if (v > 0) parts.push(`${k} ${(+v).toFixed(1)}`);
+          }
+          if (parts.length) {
+            const line = parts.length > 4 ? parts.slice(0, 4).join(', ') + '…' : parts.join(', ');
+            _label(nx + T/2, ny + T - 20, 'Need: ' + line, '#8a9aac', '6px monospace');
+          }
+        }
         continue;
       }
       if (node.is_market) {
@@ -295,7 +353,7 @@ const Renderer = (() => {
         else _drawStructure(nx, ny, node.type);
         if (node.owner_name) _label(nx + T/2, ny - 3, node.owner_name, 'rgba(200,232,138,0.9)', '7px monospace');
       } else {
-        _drawWildNode(nx, ny, node.type);
+        _drawWildNode(nx, ny, node);
       }
 
       // Amount fill bar
@@ -307,9 +365,10 @@ const Renderer = (() => {
     }
   }
 
-  function _drawWildNode(nx, ny, type) {
+  function _drawWildNode(nx, ny, node) {
+    const type = node.type;
     switch (type) {
-      case 'wood':    _wood(nx, ny);    break;
+      case 'wood':    _woodTreeWild(nx, ny, node.tree_variant); break;
       case 'stone':   _stone(nx, ny);   break;
       case 'gravel':  _gravel(nx, ny);  break;
       case 'clay':    _clay(nx, ny);    break;
@@ -376,20 +435,163 @@ const Renderer = (() => {
 
   // ── Wild resource icons ─────────────────────────────────────────────────────
 
-  function _wood(nx, ny) {
-    // Two log cross-sections (cut ends of logs)
-    const logs = [{x:11, y:15, r:8}, {x:22, y:19, r:6}];
-    for (const log of logs) {
-      ctx.beginPath(); ctx.arc(nx+log.x, ny+log.y, log.r, 0, Math.PI*2);
-      ctx.fillStyle = '#3d1f08'; ctx.fill();
-      ctx.beginPath(); ctx.arc(nx+log.x, ny+log.y, log.r - 1.5, 0, Math.PI*2);
-      ctx.fillStyle = '#7a4218'; ctx.fill();
-      ctx.beginPath(); ctx.arc(nx+log.x, ny+log.y, log.r - 3.5, 0, Math.PI*2);
-      ctx.fillStyle = '#9a5828'; ctx.fill();
-      ctx.beginPath(); ctx.arc(nx+log.x, ny+log.y, log.r - 2.5, 0, Math.PI*2);
-      ctx.strokeStyle = 'rgba(50,22,5,0.45)'; ctx.lineWidth = 0.6; ctx.stroke();
-      ctx.beginPath(); ctx.arc(nx+log.x, ny+log.y, 2, 0, Math.PI*2);
-      ctx.fillStyle = '#5a2e0e'; ctx.fill();
+  /** Wild wood nodes: standing trees (variant 0–7 deciduous, 8–15 conifer). */
+  function _woodTreeWild(nx, ny, variant) {
+    const v = ((variant == null ? 0 : variant) | 0) & 15;
+    if (v >= 8) _coniferSprite(nx, ny, v - 8);
+    else _deciduousSprite(nx, ny, v);
+  }
+
+  function _deciduousSprite(nx, ny, sub) {
+    const cx = nx + 16;
+    const trunk = (w, h, xo = 0) => {
+      ctx.fillStyle = '#4a3220';
+      ctx.fillRect(cx - w / 2 + xo, ny + 32 - h, w, h);
+      ctx.strokeStyle = 'rgba(0,0,0,0.2)';
+      ctx.strokeRect(cx - w / 2 + xo, ny + 32 - h, w, h);
+    };
+    ctx.lineWidth = 1;
+    switch (sub) {
+      case 0: // round lollipop
+        trunk(4, 11);
+        ctx.fillStyle = '#2f7a32';
+        ctx.beginPath(); ctx.arc(cx, ny + 14, 10, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#3fa040';
+        ctx.beginPath(); ctx.arc(cx - 3, ny + 12, 4, 0, Math.PI * 2); ctx.fill();
+        break;
+      case 1: // wide oval crown
+        trunk(4, 9);
+        ctx.fillStyle = '#2d6828';
+        ctx.beginPath(); ctx.ellipse(cx, ny + 13, 12, 8, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#3a8a36';
+        ctx.beginPath(); ctx.ellipse(cx + 2, ny + 11, 5, 4, 0.2, 0, Math.PI * 2); ctx.fill();
+        break;
+      case 2: // twin round crowns
+        trunk(5, 8);
+        for (const ox of [-5, 5]) {
+          ctx.fillStyle = ox < 0 ? '#2a6a28' : '#358a32';
+          ctx.beginPath(); ctx.arc(cx + ox, ny + 13, 7, 0, Math.PI * 2); ctx.fill();
+        }
+        break;
+      case 3: // tall narrow
+        trunk(3, 16);
+        ctx.fillStyle = '#327030';
+        ctx.beginPath(); ctx.arc(cx, ny + 10, 6, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#3d8840';
+        ctx.beginPath(); ctx.arc(cx, ny + 7, 3.5, 0, Math.PI * 2); ctx.fill();
+        break;
+      case 4: // short trunk, broad low crown
+        trunk(5, 6);
+        ctx.fillStyle = '#2a6828';
+        ctx.beginPath(); ctx.ellipse(cx, ny + 12, 13, 9, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#4a9a48';
+        ctx.beginPath(); ctx.ellipse(cx - 4, ny + 11, 5, 4, 0, 0, Math.PI * 2); ctx.fill();
+        break;
+      case 5: // triple blob
+        trunk(4, 10);
+        const blobs = [[0, 12], [-6, 15], [5, 16]];
+        blobs.forEach(([ox, oy], i) => {
+          ctx.fillStyle = i === 0 ? '#2e7030' : '#3a8c38';
+          ctx.beginPath(); ctx.arc(cx + ox, ny + oy, 5, 0, Math.PI * 2); ctx.fill();
+        });
+        break;
+      case 6: // tilted ellipse crown
+        trunk(4, 10);
+        ctx.save();
+        ctx.translate(cx, ny + 13);
+        ctx.rotate(0.35);
+        ctx.fillStyle = '#2f682c';
+        ctx.beginPath(); ctx.ellipse(0, 0, 11, 7, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.restore();
+        break;
+      default: // 7 — autumn mix
+        trunk(4, 9);
+        ctx.fillStyle = '#6a7a28';
+        ctx.beginPath(); ctx.arc(cx, ny + 13, 9, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#a86820';
+        ctx.beginPath(); ctx.arc(cx + 4, ny + 14, 4, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#2d6028';
+        ctx.beginPath(); ctx.arc(cx - 3, ny + 11, 4, 0, Math.PI * 2); ctx.fill();
+        break;
+    }
+  }
+
+  function _coniferSprite(nx, ny, sub) {
+    const cx = nx + 16;
+    const tri = (y0, w, h, col) => {
+      ctx.fillStyle = col;
+      ctx.beginPath();
+      ctx.moveTo(cx, y0 - h);
+      ctx.lineTo(cx - w / 2, y0);
+      ctx.lineTo(cx + w / 2, y0);
+      ctx.closePath();
+      ctx.fill();
+    };
+    ctx.lineWidth = 1;
+    switch (sub) {
+      case 0: // three stacked
+        ctx.fillStyle = '#3a2818';
+        ctx.fillRect(cx - 2, ny + 18, 4, 14);
+        tri(ny + 22, 18, 9, '#1d5020');
+        tri(ny + 17, 14, 8, '#25662a');
+        tri(ny + 12, 10, 7, '#2f7a34');
+        break;
+      case 1: // one tall triangle
+        ctx.fillStyle = '#352818';
+        ctx.fillRect(cx - 1.5, ny + 12, 3, 20);
+        tri(ny + 14, 12, 16, '#1a5530');
+        break;
+      case 2: // four tight layers
+        ctx.fillStyle = '#3a2818';
+        ctx.fillRect(cx - 2, ny + 20, 4, 12);
+        tri(ny + 24, 20, 6, '#174018');
+        tri(ny + 20, 17, 6, '#1f5520');
+        tri(ny + 16, 13, 6, '#276628');
+        tri(ny + 12, 9, 5, '#2f7830');
+        break;
+      case 3: // wide base
+        ctx.fillStyle = '#3a2818';
+        ctx.fillRect(cx - 2.5, ny + 19, 5, 13);
+        tri(ny + 22, 22, 8, '#1a4820');
+        tri(ny + 16, 16, 9, '#24702a');
+        break;
+      case 4: // leaning stack (draw in local space so trunk + foliage stay aligned)
+        ctx.save();
+        ctx.translate(cx + 2, 0);
+        ctx.rotate(-0.12);
+        ctx.fillStyle = '#3a2818';
+        ctx.fillRect(-2, ny + 18, 4, 14);
+        ctx.fillStyle = '#1d5020';
+        ctx.beginPath();
+        ctx.moveTo(0, ny + 14); ctx.lineTo(-8, ny + 22); ctx.lineTo(8, ny + 22); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = '#276628';
+        ctx.beginPath();
+        ctx.moveTo(0, ny + 9); ctx.lineTo(-6, ny + 16); ctx.lineTo(6, ny + 16); ctx.closePath(); ctx.fill();
+        ctx.restore();
+        break;
+      case 5: // shaded facets
+        ctx.fillStyle = '#3a2818';
+        ctx.fillRect(cx - 2, ny + 19, 4, 13);
+        tri(ny + 22, 18, 9, '#143818');
+        tri(ny + 17, 14, 8, '#1f5520');
+        ctx.fillStyle = 'rgba(80,120,80,0.35)';
+        ctx.beginPath();
+        ctx.moveTo(cx - 5, ny + 17); ctx.lineTo(cx - 9, ny + 22); ctx.lineTo(cx - 2, ny + 22);
+        ctx.closePath(); ctx.fill();
+        break;
+      case 6: // sparse tall
+        ctx.fillStyle = '#302418';
+        ctx.fillRect(cx - 1.5, ny + 14, 3, 18);
+        tri(ny + 16, 8, 12, '#1a5024');
+        tri(ny + 11, 6, 8, '#246030');
+        break;
+      default: // 7 — short bushy
+        ctx.fillStyle = '#3a2818';
+        ctx.fillRect(cx - 2.5, ny + 21, 5, 11);
+        tri(ny + 24, 22, 6, '#174018');
+        tri(ny + 20, 18, 7, '#226024');
+        tri(ny + 16, 12, 6, '#2c702c');
+        break;
     }
   }
 
@@ -737,7 +939,28 @@ const Renderer = (() => {
   }
 
   // ── Pile icon ───────────────────────────────────────────────────────────────
+  function _woodLogsPile(px, py) {
+    // Cut log ends (same language as the old wild wood icon — good for *piles*, not standing trees)
+    const logs = [{ x: 9, y: 19, r: 5.5 }, { x: 17, y: 21, r: 4.5 }, { x: 12, y: 24, r: 3.8 }];
+    for (const log of logs) {
+      ctx.beginPath(); ctx.arc(px + log.x, py + log.y, log.r, 0, Math.PI * 2);
+      ctx.fillStyle = '#3d1f08'; ctx.fill();
+      ctx.beginPath(); ctx.arc(px + log.x, py + log.y, log.r - 1.2, 0, Math.PI * 2);
+      ctx.fillStyle = '#7a4218'; ctx.fill();
+      ctx.beginPath(); ctx.arc(px + log.x, py + log.y, log.r - 2.8, 0, Math.PI * 2);
+      ctx.fillStyle = '#9a5828'; ctx.fill();
+      ctx.beginPath(); ctx.arc(px + log.x, py + log.y, log.r - 2, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(50,22,5,0.45)'; ctx.lineWidth = 0.5; ctx.stroke();
+      ctx.beginPath(); ctx.arc(px + log.x, py + log.y, 1.5, 0, Math.PI * 2);
+      ctx.fillStyle = '#5a2e0e'; ctx.fill();
+    }
+  }
+
   function _drawPileIcon(px, py, type) {
+    if (type === 'wood') {
+      _woodLogsPile(px, py);
+      return;
+    }
     const cols = {
       manure:'#5a3020', fertilizer:'#2a6a1a', gravel:'#888', topsoil:'#3a2010', compost:'#2a4015',
       wood:'#5a3a1a', stone:'#606070', clay:'#8a5030', dirt:'#704828', wheat:'#c0a028',
@@ -774,8 +997,8 @@ const Renderer = (() => {
 
   // ── Players / Wheelbarrows ──────────────────────────────────────────────────
   function _drawPlayers() {
-    for (const p of s.players) {
-      if (!s.player || p.id === s.player.id) continue;
+    for (const p of (s.players || [])) {
+      if (!p || p.id == null || !s.player || p.id === s.player.id) continue;
       const face = s._otherFacing[p.id] || 'down';
       _wheelbarrow(p.x * T, p.y * T, '#6ab0e8', p.username, p.flat_tire, 0, face, true);
     }
