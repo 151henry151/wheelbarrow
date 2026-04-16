@@ -126,9 +126,10 @@ window.addEventListener('load', () => {
     loginErr.textContent = '';
     loginBtn.disabled = true;
 
+    const basePath = location.pathname.replace(/\/[^/]*$/, '');
     let token;
     try {
-      const res = await fetch('/api/login', {
+      const res = await fetch(`${basePath}/api/login`, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({ username, password }),

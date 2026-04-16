@@ -1,9 +1,7 @@
 import json
+import bcrypt
 import aiomysql
-from passlib.context import CryptContext
 from server.db.connection import get_pool
-
-_pwd = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # ---------------------------------------------------------------------------
 # Auth / Players
@@ -22,7 +20,7 @@ async def login_or_register(username: str, password: str) -> dict | None:
 
             if row is None:
                 # New player
-                pw_hash = _pwd.hash(password)
+                pw_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
                 await cur.execute(
                     "INSERT INTO players (username, password_hash) VALUES (%s, %s)",
                     (username, pw_hash),
@@ -31,13 +29,13 @@ async def login_or_register(username: str, password: str) -> dict | None:
                 row = await cur.fetchone()
             else:
                 if row["password_hash"] is None:
-                    # Legacy account (no password yet) — adopt this password
-                    pw_hash = _pwd.hash(password)
+                    # Legacy account — adopt this password
+                    pw_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
                     await cur.execute(
                         "UPDATE players SET password_hash=%s WHERE id=%s",
                         (pw_hash, row["id"]),
                     )
-                elif not _pwd.verify(password, row["password_hash"]):
+                elif not bcrypt.checkpw(password.encode(), row["password_hash"].encode()):
                     return None
 
             row["bucket"] = json.loads(row["bucket"]) if isinstance(row["bucket"], str) else (row["bucket"] or {})

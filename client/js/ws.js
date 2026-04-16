@@ -4,7 +4,8 @@ const WS = (() => {
 
   function connect(token, onOpen) {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    socket = new WebSocket(`${proto}://${location.host}/ws?token=${token}`);
+    const base  = location.pathname.replace(/\/[^/]*$/, '');
+    socket = new WebSocket(`${proto}://${location.host}${base}/ws?token=${token}`);
 
     socket.addEventListener('open', () => onOpen && onOpen());
     socket.addEventListener('message', e => {
