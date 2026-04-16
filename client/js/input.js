@@ -1,10 +1,11 @@
 const Input = (() => {
-  const MOVE_INTERVAL_MS = 150;
+  const BASE_INTERVAL_MS = 150;
   const dirKeys = { ArrowUp:'up', ArrowDown:'down', ArrowLeft:'left', ArrowRight:'right' };
   const held = {};
-  let lastMove = 0;
-  let sendFn = null;
-  let onKey = null;   // callback for non-movement keys
+  let lastMove    = 0;
+  let speedMult   = 1.0;   // increased when flat tyre
+  let sendFn      = null;
+  let onKey       = null;
 
   function init(fn, keyFn) {
     sendFn = fn;
@@ -17,9 +18,14 @@ const Input = (() => {
     window.addEventListener('keyup', e => { delete held[e.key]; });
   }
 
+  function setSpeedMult(mult) {
+    speedMult = mult;
+  }
+
   function update(now) {
     if (!sendFn) return;
-    if (now - lastMove < MOVE_INTERVAL_MS) return;
+    const interval = BASE_INTERVAL_MS * speedMult;
+    if (now - lastMove < interval) return;
     for (const [key, dir] of Object.entries(dirKeys)) {
       if (held[key]) {
         sendFn({ type: 'move', dir });
@@ -29,5 +35,5 @@ const Input = (() => {
     }
   }
 
-  return { init, update };
+  return { init, update, setSpeedMult };
 })();

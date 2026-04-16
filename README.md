@@ -2,33 +2,77 @@
 
 A real-time browser-based MMO where you are a wheelbarrow.
 
-You spawn in a field with nothing. You roll around a shared persistent world, gathering resources by parking near them, hauling loads to market, earning money, buying land, and slowly building up infrastructure that other players depend on. The world keeps running — and your structures keep earning — even when you're not playing.
+You spawn in a field with nothing. You roll around a shared persistent world, gathering resources by parking near them, hauling loads to market, earning money, buying land, building infrastructure, and farming. The world keeps running — and your structures keep earning — even when you're not playing.
 
 Inspired by the spirit of [A Tractor](https://store.steampowered.com/app/779050/A_tractor/) — a semi-serious social-economic simulation — but you're a wheelbarrow.
+
+**Live at:** https://hromp.com/wheelbarrow/
 
 ---
 
 ## Gameplay
 
 ### The basics
-- Move your wheelbarrow around the world with the **arrow keys**
-- **Park near a resource** (a manure patch, a gravel pile, loose soil) and your bucket slowly fills up over time
-- **Haul your load** to a market stall and sell it for coins
-- The world keeps ticking on the server whether you're logged in or not — park strategically before you log off
+- Move with **arrow keys** (slower when you have a flat tyre)
+- **Park near a resource** and your bucket slowly fills — proximity collection is passive
+- **Haul your load** to the NPC market (`50,60`) and press **Space** to sell
+- Wild resources **deplete** over time, forcing you to travel further from spawn to find fresh nodes
+- The server runs 24/7 — park near resources before logging off and collect the difference when you return
+
+### Key bindings
+
+| Key | Action |
+|---|---|
+| Arrow keys | Move |
+| Space | Sell at NPC market |
+| B | Buy current land parcel (500c) |
+| P | Open build menu (on own land) |
+| U | Unload bucket to resource pile (on own land) |
+| E | Context interact — open NPC shop / manage pile prices / trade at player market |
+| F | Farm action — plant wheat / fertilize / harvest |
+| 1–9 | Select item in any open menu |
+| Esc | Close menu |
 
 ### The economy ladder
-1. **Spawn** in an open field with an empty bucket and no money
-2. **Find free resources** — wild manure patches, loose gravel, and scattered soil exist in the starting zone so new players can always bootstrap
-3. **Sell at the market** — prices fluctuate based on supply and demand from all players
-4. **Buy land** — save up enough coins to purchase a parcel; you can only build on land you own
-5. **Build structures** — a horse stable generates manure; a gravel pit generates gravel; a compost heap generates compost. Building takes time and resources
-6. **Earn passive income** — other players park next to your structures to collect resources and pay you a small fee. Your infrastructure serves the whole server
+1. **Spawn** — collect free resources near spawn (manure, gravel, topsoil, compost)
+2. **Sell** at the NPC primary market; prices drift based on supply
+3. **Buy land** — 500c per 10×10 parcel
+4. **Pile resources** on your land (`U`), set a sell price (`E`), and let other players buy from you — no market building required
+5. **Build structures** — horse stable, gravel pit, compost heap; other players pay you a fee when they collect
+6. **Build a Player Market** (2000c + 50 wood + 30 stone) — set custom buy and sell prices for any goods; the most powerful economic tool in the game
+7. **Farm wheat** — buy seeds from the Seed Shop, plant on owned land, optionally fertilize for double yield, harvest in ~10–20 min
+8. **Upgrade your wheelbarrow** at the General Store — larger bucket, better tyres, stronger handle, better barrow material (6 levels each, very expensive at top end)
 
-### Key mechanics
-- **Proximity collection** — you don't click to collect; you just roll up and wait. The closer and longer you stay, the more you gather
-- **Bucket capacity** — your wheelbarrow has limited carrying capacity; upgrade it to haul more per trip
-- **Offline persistence** — the server runs the world 24/7. Log in after a long absence and collect everything that accumulated while you were away (up to your bucket cap)
-- **Player-driven world** — early players build the infrastructure new players depend on. The map fills up organically over time
+### Wheelbarrow condition
+Your wheelbarrow degrades as you move:
+- **Paint** fades — eventual holes cause cargo to spill while moving (buy stainless barrow to slow this)
+- **Tyre** wears — random flat tyre when condition is low; flat tyre triples move time until repaired
+- **Handle** wears — random break when condition is low; broken handle = immobile until repaired
+
+Repair at the **Repair Shop** (50,44). Upgrades reduce wear rates.
+
+### NPC shops
+| Shop | Location | Sells |
+|---|---|---|
+| Seed Shop | (56,50) | Wheat seeds, fertilizer |
+| General Store | (44,50) | Wheelbarrow upgrades (6 levels each) |
+| Repair Shop | (50,44) | Condition repairs, flat tyre fix |
+
+### Seasons
+The year cycles through **Spring → Summer → Fall → Winter** (15 minutes each). Farming is tuned around the season cycle; the current season and time remaining are shown in the HUD.
+
+### Resource types
+| Resource | Where | NPC price | Notes |
+|---|---|---|---|
+| Manure | Near spawn, horse stables | 2c | Starter resource |
+| Gravel | Near spawn, gravel pits | 3c | Needed for gravel pit build |
+| Topsoil | Near spawn | 3c | Needed for topsoil mound build |
+| Compost | Near spawn | 4c | High replenish cost structure |
+| Wood | Forest corners | 3c | Needed for Player Market build |
+| Stone | Map edges | 4c | Needed for Player Market build; very slow replenish |
+| Clay | Mid-map | 2.5c | Moderate replenish |
+| Dirt | Widespread | 1c | Low value, fast replenish |
+| Wheat | Farmed | 5c | Needs farming skill |
 
 ---
 
@@ -41,7 +85,7 @@ Inspired by the spirit of [A Tractor](https://store.steampowered.com/app/779050/
 | Database | MariaDB |
 | Frontend | HTML5 Canvas, vanilla JavaScript |
 | Server | Debian 12, nginx reverse proxy |
-| Domain | [wheelbarrow.hromp.com](https://wheelbarrow.hromp.com) |
+| Domain | [hromp.com/wheelbarrow/](https://hromp.com/wheelbarrow/) |
 
 ---
 
@@ -50,29 +94,35 @@ Inspired by the spirit of [A Tractor](https://store.steampowered.com/app/779050/
 ```
 wheelbarrow/
 ├── server/
-│   ├── main.py          # FastAPI app entry point
+│   ├── main.py           # FastAPI app, REST + WebSocket endpoints
+│   ├── config.py         # Settings (env vars)
 │   ├── game/
-│   │   ├── world.py     # World map, tiles, resource nodes
-│   │   ├── player.py    # Player/wheelbarrow state
-│   │   ├── tick.py      # Server-side game loop
-│   │   └── economy.py   # Market prices, transactions, land
+│   │   ├── engine.py     # In-memory game state, all game actions
+│   │   ├── tick.py       # Server-side game loop (asyncio)
+│   │   ├── constants.py  # Game constants and definitions
+│   │   ├── seasons.py    # Season clock
+│   │   └── wb_condition.py # Wheelbarrow condition/decay
 │   └── db/
-│       └── models.py    # MariaDB schema and queries
+│       ├── connection.py # aiomysql connection pool
+│       └── queries.py    # All DB queries
+├── db/
+│   └── init.sql          # MariaDB schema + seed data
 ├── client/
-│   ├── index.html       # Game shell
+│   ├── index.html
 │   ├── js/
-│   │   ├── game.js      # Main client game loop
-│   │   ├── renderer.js  # Canvas rendering
-│   │   ├── input.js     # Arrow key / input handling
-│   │   └── ws.js        # WebSocket client
+│   │   ├── game.js       # Main client loop, HUD, key bindings
+│   │   ├── renderer.js   # Canvas rendering
+│   │   ├── input.js      # Arrow key input with speed multiplier
+│   │   └── ws.js         # WebSocket client
 │   └── css/
 │       └── style.css
-├── wheelbarrow/
-│   └── wheelbarrow.py   # Python model of a wheelbarrow (core domain objects)
+├── deploy/               # nginx config, deploy README
+├── Dockerfile
+├── docker-compose.yml
+├── wheelbarrow.service   # systemd unit
 ├── pyproject.toml
 ├── requirements.txt
-├── .env.example
-└── wheelbarrow.service  # systemd service template
+└── .env.example
 ```
 
 ---
@@ -104,4 +154,4 @@ See `wheelbarrow.service` for the service unit template. Deployment is handled m
 
 ## Version
 
-Current version: **0.1.0** — initial project scaffold. See [CHANGELOG.md](CHANGELOG.md).
+Current version: **0.4.0**. See [CHANGELOG.md](CHANGELOG.md).

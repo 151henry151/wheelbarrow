@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-04-15
+
+### Added
+- **Procedural world resources**: 50+ resource nodes (wood, stone, clay, dirt) scattered across the full 100×100 world; wild nodes have slow replenish rates (0.02–0.07/s) so they deplete and force players to explore further
+- **Resource piling**: press `U` to unload your bucket onto owned land; piles persist in DB (`resource_piles` table)
+- **Player-to-player selling**: pile owners press `E` to set a per-unit price; other players press `E` to buy up to their bucket capacity (carry limit enforced)
+- **Season system**: 4 seasons × 15 min real-time = 60-min cycle; HUD shows current season and time remaining; season change broadcasts to all clients
+- **Farming**: buy wheat seeds from Seed Shop (`E` near shop) → plant on owned land (`F`) → optional fertilize during growth window → harvest (`F` when ready); yields 8–16 wheat
+- **NPC shops**: Seed Shop (56,50), General Store (44,50), Repair Shop (50,44) rendered on map; `E` to open shop overlay; number keys to buy
+- **Wheelbarrow condition**: paint, tire, handle degrade per move; random events: flat tyre (3× slower), handle break (immobile), cargo spill through holes; all shown in new WB condition HUD (top-right)
+- **Wheelbarrow upgrades** (6 levels each): barrow size (bucket 10→85), tire quality (flat chance ×0.11), handle quality (break chance ×0.10), barrow material (rust/paint decay ×0.12); bought at General Store; costs scale to 45,000–50,000c for max level — long grind for small incremental edge
+- **Repair Shop**: repair paint/tire/handle by percentage at per-point cost; fix flat tyre for flat 40c fee
+- **Player Market building** (2000c + 50 wood + 30 stone): owner sets buy/sell prices; other players trade at market with `E`; market holds its own inventory
+- **New resource types in NPC market**: wood, stone, clay, dirt, wheat with baseline prices; market drift applies to all types
+- **WB condition HUD**: top-right panel shows paint/tire/handle bars (green→yellow→red), flat tyre indicator, and current upgrade levels
+- **Pocket**: separate from bucket; holds seeds and fertilizer; shown in HUD
+- **Flat-tyre movement**: client-side move interval ×3 when tyre is flat (enforced via `Input.setSpeedMult`)
+
+### Changed
+- `players` table: added `pocket`, `wb_paint`, `wb_tire`, `wb_handle`, `flat_tire`, `wb_bucket_level`, `wb_tire_level`, `wb_handle_level`, `wb_barrow_level` columns (DB reset required from v0.3.x)
+- `structures` table: added `inventory` and `config` JSON columns (for player market)
+- NPC primary market now named distinctly from player-built markets; can never be purchased
+
+### Fixed
+- `save_player` now persists all new WB condition and upgrade fields
+
 ## [0.3.1] - 2026-04-16
 
 ### Fixed

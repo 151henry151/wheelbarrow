@@ -22,20 +22,47 @@
   <div id="game-screen" style="display:none">
     <canvas id="game"></canvas>
 
+    <!-- Main HUD (top-left) -->
     <div id="hud">
+      <div id="hud-season"></div>
       <div id="hud-coins">coins: <span id="hud-coins-val">0</span></div>
       <div id="hud-bucket">
         <div id="hud-bucket-label">bucket</div>
         <div id="hud-bucket-contents">empty</div>
         <div id="hud-bucket-bar"><div id="hud-bucket-fill"></div></div>
       </div>
+      <div id="hud-pocket"></div>
       <div id="hud-prices"></div>
       <div id="hud-hint"></div>
     </div>
 
+    <!-- Wheelbarrow condition HUD (top-right, always visible) -->
+    <div id="hud-wb">
+      <div class="wb-label">Wheelbarrow</div>
+      <div class="wb-row"><span>Paint</span><div class="wb-bar-wrap"><div id="wb-paint-bar" class="wb-bar"></div></div><span id="wb-paint-val">100</span></div>
+      <div class="wb-row"><span>Tire</span><div class="wb-bar-wrap"><div id="wb-tire-bar"  class="wb-bar"></div></div><span id="wb-tire-val">100</span><span id="wb-flat-ind"></span></div>
+      <div class="wb-row"><span>Handle</span><div class="wb-bar-wrap"><div id="wb-handle-bar" class="wb-bar"></div></div><span id="wb-handle-val">100</span></div>
+      <div id="wb-upgrades"></div>
+    </div>
+
+    <!-- Build menu -->
     <div id="build-menu" style="display:none">
       <div id="build-menu-title">Build here</div>
       <div id="build-menu-items"></div>
+      <div class="build-menu-close">[Esc] close</div>
+    </div>
+
+    <!-- NPC shop overlay -->
+    <div id="shop-menu" style="display:none">
+      <div id="shop-menu-title"></div>
+      <div id="shop-menu-items"></div>
+      <div class="build-menu-close">[Esc] close</div>
+    </div>
+
+    <!-- Pile management overlay -->
+    <div id="pile-menu" style="display:none">
+      <div id="pile-menu-title">Your resource pile</div>
+      <div id="pile-menu-items"></div>
       <div class="build-menu-close">[Esc] close</div>
     </div>
 
