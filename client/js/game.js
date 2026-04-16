@@ -416,7 +416,7 @@ function toggleHud() {
   const show = state.hudVisible;
   document.getElementById('hud').style.display    = show ? 'block' : 'none';
   document.getElementById('hud-wb').style.display = show ? 'block' : 'none';
-  document.getElementById('hud-toggle').textContent = show ? '[H] close hud' : '[H] open hud';
+  document.getElementById('hud-toggle').textContent = show ? '[H] close hud' : '[H] hud';
 }
 
 // --------------------------------------------------------------- key handler
@@ -630,7 +630,7 @@ window.addEventListener('load', () => {
     // HUD is hidden by default
     document.getElementById('hud').style.display    = 'none';
     document.getElementById('hud-wb').style.display = 'none';
-    document.getElementById('hud-toggle').textContent = '[H] open hud';
+    document.getElementById('hud-toggle').textContent = '[H] hud';
 
     const canvas = document.getElementById('game');
     Renderer.init(canvas, state);
@@ -728,6 +728,10 @@ window.addEventListener('load', () => {
       Input.update(now);
       Renderer.draw();
       updateHud();
+      if (!state.hudVisible && state.player) {
+        document.getElementById('hud-toggle').textContent =
+          `[H] hud  (${state.player.x}, ${state.player.y})`;
+      }
       requestAnimationFrame(loop);
     }
     requestAnimationFrame(loop);
