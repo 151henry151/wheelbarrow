@@ -46,6 +46,8 @@ WB_BREAK_THRESH       = 15
 WB_PAINT_RUST_THRESH  = 50   # paint below this → barrow starts to rust
 WB_BARROW_HOLE_THRESH = 60   # barrow below this → cargo starts spilling
 WB_SPILL_AMT          = 0.5
+# When wb_handle is 0 (snapped), carry capacity is bucket_cap * this until repaired at Repair Shop
+WB_HANDLE_BROKEN_CAP_MULT = 0.5
 
 WB_PROB_FLAT  = 0.0030
 WB_PROB_BREAK = 0.0015

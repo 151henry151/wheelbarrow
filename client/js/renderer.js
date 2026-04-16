@@ -782,7 +782,7 @@ const Renderer = (() => {
     if (s.player) {
       const bucket = s.player.bucket || {};
       const total  = Object.values(bucket).reduce((a, b) => a + b, 0);
-      const cap    = s.player.bucket_cap || 10;
+      const cap    = s.player.bucket_cap_effective != null ? s.player.bucket_cap_effective : (s.player.bucket_cap || 10);
       const face   = s.facing || 'down';
       _wheelbarrow(s.player.x * T, s.player.y * T, '#f5c842', s.player.username,
                    s.player.flat_tire, Math.min(1, total / cap), face, false);

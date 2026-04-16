@@ -60,6 +60,9 @@ const UPGRADE_COSTS = {
 };
 const WB_BUCKET_CAPS = {1:10, 2:16, 3:26, 4:40, 5:60, 6:85};
 
+// Fallback if init sends no npc_markets (mirrors server MARKET_TILE)
+const NPC_MARKET_FALLBACK = { x: 500, y: 560 };
+
 function _upgradeLevelLabel(comp, level) {
   if (comp === 'barrow') return WB_BARROW_MATERIAL_NAMES[level] || `L${level}`;
   if (comp === 'tire')   return WB_TIRE_TYPE_NAMES[level]        || `L${level}`;
@@ -100,6 +103,11 @@ const state = {
   currentTownId: null,   // id of town player is currently in
   _townMenuTown: null,   // scratch ref used by town menu key handler
   _townMenuOpts: [],     // ordered option list for town menu
+
+  sellAutopilotActive: false,
+  sellAutopilotPile:   null,   // { x, y, resource_type } while running
+  _tickWaiters:        [],
+  _soldWaiter:         null,
 };
 
 // ---------------------------------------------------------------- helpers
@@ -162,6 +170,167 @@ function _onNpcMarketTile(px, py) {
   return mks.some(m => m.x === px && m.y === py);
 }
 
+/** Matches server effective_bucket_cap (half while handle is snapped). */
+function effectiveBucketCap(p) {
+  if (!p) return 10;
+  return p.bucket_cap_effective != null ? p.bucket_cap_effective : (p.bucket_cap || 10);
+}
+
+function _bucketTotalPlayer(p) {
+  return Object.values(p.bucket || {}).reduce((a, b) => a + b, 0);
+}
+
+function _npcMarketTarget() {
+  const markets = state.npc_markets && state.npc_markets.length
+    ? state.npc_markets
+    : [NPC_MARKET_FALLBACK];
+  const ref = state.sellAutopilotPile || state.player;
+  const hx = ref.x != null ? ref.x : state.player.x;
+  const hy = ref.y != null ? ref.y : state.player.y;
+  let best = markets[0];
+  let bestD = Infinity;
+  for (const m of markets) {
+    if (m.x === undefined || m.y === undefined) continue;
+    const d = Math.abs(m.x - hx) + Math.abs(m.y - hy);
+    if (d < bestD) {
+      bestD = d;
+      best = m;
+    }
+  }
+  return { x: best.x, y: best.y };
+}
+
+function _findPileAt(hx, hy, rtype) {
+  return state.piles.find(pl => pl.x === hx && pl.y === hy && pl.resource_type === rtype);
+}
+
+function waitNextTick() {
+  return new Promise(resolve => {
+    state._tickWaiters.push(resolve);
+  });
+}
+
+function _nextDirToward(px, py, tx, ty) {
+  if (px < tx) return 'right';
+  if (px > tx) return 'left';
+  if (py < ty) return 'down';
+  if (py > ty) return 'up';
+  return null;
+}
+
+async function _autopilotMoveToTile(tx, ty) {
+  let guard = 0;
+  while (
+    state.sellAutopilotActive &&
+    (state.player.x !== tx || state.player.y !== ty) &&
+    guard++ < 6000
+  ) {
+    const px = state.player.x;
+    const py = state.player.y;
+    const dir = _nextDirToward(px, py, tx, ty);
+    if (!dir) break;
+    state.facing = dir;
+    WS.send({ type: 'move', dir });
+    await waitNextTick();
+    if (state.player.x === px && state.player.y === py) await waitNextTick();
+  }
+  return state.player.x === tx && state.player.y === ty;
+}
+
+/**
+ * Wait on pile tile until we should go sell (full barrow or pile empty with cargo left),
+ * or done (pile and bucket empty).
+ */
+async function _waitLoadPhase(rtype, hx, hy) {
+  while (state.sellAutopilotActive) {
+    if (state.player.x !== hx || state.player.y !== hy) {
+      await _autopilotMoveToTile(hx, hy);
+      continue;
+    }
+    const pile = _findPileAt(hx, hy, rtype);
+    const pa = pile ? pile.amount : 0;
+    const ld = _bucketTotalPlayer(state.player);
+    const cap = effectiveBucketCap(state.player);
+    if (pa <= 0 && ld <= 0) return 'done';
+    if (ld >= cap - 0.06) return 'sell';
+    if (pa <= 0 && ld > 0) return 'sell';
+    await waitNextTick();
+  }
+  return 'abort';
+}
+
+function waitForSoldMessage() {
+  return new Promise(resolve => {
+    state._soldWaiter = resolve;
+  });
+}
+
+function stopSellAutopilot(reason) {
+  if (!state.sellAutopilotActive) return;
+  state.sellAutopilotActive = false;
+  state.sellAutopilotPile = null;
+  if (typeof Input !== 'undefined') {
+    Input.setAutopilotBlocked(false);
+    Input.clearHeldKeys();
+  }
+  const banner = document.getElementById('autopilot-banner');
+  if (banner) banner.style.display = 'none';
+  if (state._soldWaiter) {
+    const w = state._soldWaiter;
+    state._soldWaiter = null;
+    w();
+  }
+  const tw = state._tickWaiters.splice(0);
+  tw.forEach(fn => fn());
+  if (reason === 'user') showNotice('Autopilot stopped.');
+  else if (reason === 'complete') showNotice('Autopilot finished — stood by empty pile.');
+}
+
+async function runSellAutopilotLoop(rtype, hx, hy) {
+  const market = _npcMarketTarget();
+  while (state.sellAutopilotActive) {
+    await _autopilotMoveToTile(hx, hy);
+    if (!state.sellAutopilotActive) return;
+
+    const phase = await _waitLoadPhase(rtype, hx, hy);
+    if (!state.sellAutopilotActive || phase === 'abort') return;
+    if (phase === 'done') {
+      await _autopilotMoveToTile(hx, hy);
+      return;
+    }
+
+    await _autopilotMoveToTile(market.x, market.y);
+    if (!state.sellAutopilotActive) return;
+
+    const bt = _bucketTotalPlayer(state.player);
+    if (bt <= 0) continue;
+
+    const soldPromise = waitForSoldMessage();
+    WS.send({ type: 'sell' });
+    await soldPromise;
+    if (!state.sellAutopilotActive) return;
+  }
+}
+
+function startSellAutopilotFromPile(pile) {
+  if (state.sellAutopilotActive || !pile || pile.owner_id !== state.player.id) return;
+  if (!pile.amount || pile.amount <= 0) return;
+
+  state.sellAutopilotActive = true;
+  state.sellAutopilotPile = { x: pile.x, y: pile.y, resource_type: pile.resource_type };
+  Input.setAutopilotBlocked(true);
+  Input.clearHeldKeys();
+  const banner = document.getElementById('autopilot-banner');
+  if (banner) banner.style.display = 'block';
+  showNotice('Autopilot — load, NPC market, repeat. Press any key except H to stop.');
+
+  runSellAutopilotLoop(pile.resource_type, pile.x, pile.y)
+    .then(() => {
+      if (state.sellAutopilotActive) stopSellAutopilot('complete');
+    })
+    .catch(() => stopSellAutopilot('user'));
+}
+
 // ---------------------------------------------------------------- notice bar
 let noticeTimer = null;
 function showNotice(msg) {
@@ -179,7 +348,7 @@ function showNotice(msg) {
 // ---------------------------------------------------------------- load speed
 function _loadSpeedMult(player) {
   const bucket = player.bucket || {};
-  const cap    = player.bucket_cap || 10;
+  const cap    = effectiveBucketCap(player);
   let totalWeight = 0;
   for (const [rtype, amount] of Object.entries(bucket)) {
     totalWeight += (RESOURCE_WEIGHTS[rtype] ?? RESOURCE_WEIGHT_DEFAULT) * amount;
@@ -227,7 +396,7 @@ function updateHud() {
 
   const bucket = state.player.bucket || {};
   const total  = Object.values(bucket).reduce((a,b) => a+b, 0);
-  const cap    = state.player.bucket_cap || 10;
+  const cap    = effectiveBucketCap(state.player);
   const lines  = Object.entries(bucket).filter(([,v]) => v > 0).map(([k,v]) => `${k}: ${v}`);
   document.getElementById('hud-bucket-contents').textContent = lines.length ? lines.join('\n') : 'empty';
   document.getElementById('hud-bucket-fill').style.width = `${Math.min(100, (total/cap)*100)}%`;
@@ -288,6 +457,14 @@ function _updateHint() {
   const px  = p.x, py = p.y;
   const hints = [];
 
+  if (state.sellAutopilotActive) {
+    hints.push('Autopilot — any key except H stops');
+  }
+
+  if ((p.wb_handle ?? 100) <= 0) {
+    hints.push('Snapped handle — half barrow capacity until you repair at Repair Shop');
+  }
+
   const atMarket = _onNpcMarketTile(px, py);
   const total    = Object.values(p.bucket || {}).reduce((a,b) => a+b, 0);
   if (atMarket && total > 0) hints.push('[Space] sell all at NPC market');
@@ -339,7 +516,7 @@ function _updateHint() {
     if (otherPiles.length) hints.push('[E] buy from pile');
     const pick = pilesHere.find(pl => _canFreePickPile(pl, p) && pl.amount > 0);
     if (pick) {
-      const cap  = p.bucket_cap || 10;
+      const cap  = effectiveBucketCap(p);
       const load = Object.values(p.bucket || {}).reduce((a, b) => a + b, 0);
       if (load < cap) hints.push(`Loading ${pick.resource_type} from pile…`);
     }
@@ -452,6 +629,8 @@ function openPileMenu() {
   const items = document.getElementById('pile-menu-items');
   items.innerHTML = '';
   pilesHere.forEach((pile, i) => {
+    const wrap = document.createElement('div');
+    wrap.className = 'pile-menu-entry';
     const div = document.createElement('div');
     div.className = 'build-option affordable';
     const isOwn  = pile.owner_id === p.id;
@@ -461,7 +640,31 @@ function openPileMenu() {
     } else {
       div.innerHTML = `<span class="key">[${i+1}]</span> Buy ${pile.resource_type}: ${pile.amount} @ ${priceStr}`;
     }
-    items.appendChild(div);
+    wrap.appendChild(div);
+    if (isOwn && pile.amount > 0) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'pile-sell-all-btn';
+      btn.textContent = 'Sell all at NPC market…';
+      btn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        if (state.sellAutopilotActive) {
+          showNotice('Autopilot already running.');
+          return;
+        }
+        if (!confirm(
+          'Sell all at NPC market?\n\n'
+          + 'Your wheelbarrow will autopilot: stand on this pile until your barrow loads, '
+          + 'roll to the main NPC market tile and sell, return here, and repeat until this pile is empty. '
+          + 'Then you stop on this tile.\n\n'
+          + 'Press any key except H (HUD toggle) to cancel autopilot.',
+        )) return;
+        closeAllMenus();
+        startSellAutopilotFromPile(pile);
+      });
+      wrap.appendChild(btn);
+    }
+    items.appendChild(wrap);
   });
   menu.style.display = 'block';
 }
@@ -560,6 +763,11 @@ function toggleHud() {
 
 // --------------------------------------------------------------- key handler
 function handleKey(key) {
+  if (state.sellAutopilotActive && key.toLowerCase() === 'h') {
+    toggleHud();
+    return;
+  }
+
   // Escape: cancel parcel preview or close menus
   if (key === 'Escape') {
     if (state.parcelPreview !== null) {
@@ -625,7 +833,7 @@ function handleKey(key) {
       WS.send({ type: 'set_pile_price', resource_type: pile.resource_type, price });
     } else if (pile.sell_price != null) {
       const maxAfford = Math.floor(p.coins / pile.sell_price);
-      const space     = (p.bucket_cap || 10) - Object.values(p.bucket || {}).reduce((a,b)=>a+b,0);
+      const space     = effectiveBucketCap(p) - Object.values(p.bucket || {}).reduce((a,b)=>a+b,0);
       const maxBuy    = Math.min(pile.amount, space, maxAfford);
       if (maxBuy <= 0) { showNotice('Cannot afford or no bucket space.'); closeAllMenus(); return; }
       WS.send({ type: 'buy_pile', resource_type: pile.resource_type, amount: maxBuy });
@@ -780,6 +988,15 @@ window.addEventListener('load', () => {
       WS.send(msg);
     }, handleKey);
 
+    window.addEventListener('keydown', (e) => {
+      if (!state.sellAutopilotActive) return;
+      if (e.ctrlKey || e.altKey || e.metaKey) return;
+      if (e.key === 'h' || e.key === 'H') return;
+      stopSellAutopilot('user');
+      e.preventDefault();
+      e.stopPropagation();
+    }, true);
+
     WS.on('init', msg => {
       state.player        = msg.player;
       state.player.username = username;
@@ -844,6 +1061,11 @@ window.addEventListener('load', () => {
           }
         }
       }
+
+      if (state._tickWaiters.length) {
+        const fn = state._tickWaiters.shift();
+        if (fn) fn();
+      }
     });
 
     WS.on('sold', msg => {
@@ -853,6 +1075,11 @@ window.addEventListener('load', () => {
         showNotice(`Sold for ${msg.earned} coins!`);
       } else if (msg.msg) {
         showNotice(msg.msg);
+      }
+      if (state._soldWaiter) {
+        const w = state._soldWaiter;
+        state._soldWaiter = null;
+        w();
       }
     });
 

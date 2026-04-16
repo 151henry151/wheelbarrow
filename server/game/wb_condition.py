@@ -9,6 +9,7 @@ from server.game.constants import (
     WB_PAINT_RUST_THRESH, WB_BARROW_HOLE_THRESH, WB_SPILL_AMT,
     WB_PROB_FLAT, WB_PROB_BREAK, WB_PROB_HOLE,
     WB_TIRE_FLAT_MULT, WB_HANDLE_BREAK_MULT, WB_BARROW_DECAY_MULT,
+    WB_HANDLE_BROKEN_CAP_MULT,
 )
 
 
@@ -16,9 +17,10 @@ def apply_move_decay(player: dict) -> list[str]:
     """
     Degrade WB condition by one move's worth.
     Returns a list of event strings:
-        "flat_tire"        — tyre just went flat
-        "handle_break"     — handle just broke (wb_handle → 0)
-        "spill:<type>:<amt>" — cargo spilled through a hole
+        "flat_tire" — tyre just went flat
+        "handle_break" — handle just snapped (wb_handle → 0); carry cap halved until repair
+        "spill:<type>:<amt>" — cargo spilled through a barrow hole
+        "overspill:<type>:<amt>" — cargo dropped to satisfy reduced capacity (broken handle)
     """
     events: list[str] = []
 
@@ -65,6 +67,7 @@ def apply_move_decay(player: dict) -> list[str]:
         if random.random() < chance:
             player["wb_handle"] = 0.0
             events.append("handle_break")
+            events.extend(trim_bucket_to_effective_cap(player))
 
     # --- Barrow hole / cargo spill ---
     barrow_cond = player.get("wb_barrow", 100.0)
@@ -81,12 +84,47 @@ def apply_move_decay(player: dict) -> list[str]:
                     del bucket[spill_type]
                 events.append(f"spill:{spill_type}:{round(spill_amt, 2)}")
 
+    # Broken handle: enforce reduced carry cap (spill excess if something put load over limit)
+    if player.get("wb_handle", 100.0) <= 0.0:
+        events.extend(trim_bucket_to_effective_cap(player))
+
     return events
 
 
-def is_immobile(player: dict) -> bool:
-    """Returns True when the handle is fully broken and the WB can't move."""
-    return player.get("wb_handle", 100.0) <= 0.0
+def effective_bucket_cap(player: dict) -> float:
+    """Nominal bucket_cap, or half while handle is snapped (wb_handle <= 0)."""
+    base = float(player.get("bucket_cap", 10))
+    if player.get("wb_handle", 100.0) <= 0.0:
+        return round(base * WB_HANDLE_BROKEN_CAP_MULT, 2)
+    return base
+
+
+def trim_bucket_to_effective_cap(player: dict) -> list[str]:
+    """
+    If load exceeds effective_bucket_cap, spill resources until within cap.
+    Returns spill event strings for the client notice (same format as barrow holes).
+    """
+    events: list[str] = []
+    bucket = player.get("bucket")
+    if not bucket:
+        return events
+    cap = effective_bucket_cap(player)
+    total = sum(bucket.values())
+    while total > cap + 1e-6:
+        keys = [k for k, v in bucket.items() if v > 0]
+        if not keys:
+            break
+        rtype = random.choice(keys)
+        need = total - cap
+        spill_amt = round(min(bucket[rtype], need), 2)
+        if spill_amt <= 0:
+            break
+        bucket[rtype] = round(bucket[rtype] - spill_amt, 2)
+        if bucket[rtype] <= 0:
+            del bucket[rtype]
+        total = sum(bucket.values())
+        events.append(f"overspill:{rtype}:{spill_amt}")
+    return events
 
 
 def flat_move_multiplier(player: dict) -> float:

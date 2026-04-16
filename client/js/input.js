@@ -6,6 +6,7 @@ const Input = (() => {
   let speedMult   = 1.0;   // increased when flat tyre
   let sendFn      = null;
   let onKey       = null;
+  let autopilotBlocked = false;
 
   function init(fn, keyFn) {
     sendFn = fn;
@@ -25,7 +26,7 @@ const Input = (() => {
   }
 
   function update(now) {
-    if (!sendFn) return;
+    if (!sendFn || autopilotBlocked) return;
     const interval = BASE_INTERVAL_MS * speedMult;
     if (now - lastMove < interval) return;
     for (const [key, dir] of Object.entries(dirKeys)) {
@@ -37,5 +38,13 @@ const Input = (() => {
     }
   }
 
-  return { init, update, setSpeedMult };
+  function setAutopilotBlocked(v) {
+    autopilotBlocked = !!v;
+  }
+
+  function clearHeldKeys() {
+    for (const k of Object.keys(held)) delete held[k];
+  }
+
+  return { init, update, setSpeedMult, setAutopilotBlocked, clearHeldKeys };
 })();

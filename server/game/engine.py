@@ -1,7 +1,8 @@
 """
 In-memory game state. All mutation happens here; the DB handles persistence.
 
-v0.7.0: staged construction, silos, winter pile spoilage; worlds are 1000×1000;
+v0.8.0: broken-handle half capacity, bucket_cap_effective; v0.7.0: staged construction, silos, winter spoilage;
+worlds are 1000×1000;
 towns have polygon boundaries; transactions carry town taxes.
 """
 import asyncio
@@ -30,7 +31,11 @@ from server.game.constants import (
     VIEWPORT_RADIUS,
 )
 from server.game.seasons import SeasonClock
-from server.game.wb_condition import apply_move_decay, is_immobile
+from server.game.wb_condition import (
+    apply_move_decay,
+    effective_bucket_cap,
+    trim_bucket_to_effective_cap,
+)
 from server.game.town_npcs import (
     place_npc_district,
     parse_npc_district,
@@ -64,7 +69,7 @@ def _migrate_pocket_fertilizer_to_bucket(player: dict) -> None:
         return
     if amt <= 0:
         return
-    cap = player.get("bucket_cap", 10) - _bucket_total(player.get("bucket", {}))
+    cap = effective_bucket_cap(player) - _bucket_total(player.get("bucket", {}))
     move = min(amt, cap)
     if move <= 0:
         pocket["fertilizer"] = amt
@@ -433,6 +438,7 @@ class GameEngine:
         player.setdefault("wb_barrow_level", 1)
         player["bucket_cap"] = WB_BUCKET_CAP.get(player["wb_bucket_level"], 10)
         _migrate_pocket_fertilizer_to_bucket(player)
+        trim_bucket_to_effective_cap(player)
         self.players[player["id"]] = player
         return token
 
@@ -477,11 +483,6 @@ class GameEngine:
         player = self.players.get(player_id)
         if not player:
             return
-        if is_immobile(player):
-            asyncio.ensure_future(self._send(player_id, {
-                "type": "notice", "msg": "Handle broken — go to Repair Shop.",
-            }))
-            return
         dx, dy = {"up": (0,-1), "down": (0,1), "left": (-1,0), "right": (1,0)}.get(direction, (0,0))
         if dx == 0 and dy == 0:
             return
@@ -496,11 +497,15 @@ class GameEngine:
                     "msg": "Flat tyre! Movement is slower. Find the Repair Shop."}))
             elif ev == "handle_break":
                 asyncio.ensure_future(self._send(player_id, {"type": "notice",
-                    "msg": "Handle snapped! You can't move. Find the Repair Shop."}))
+                    "msg": "Handle snapped! You can only haul half capacity until you repair it at the Repair Shop."}))
             elif ev.startswith("spill:"):
                 _, rtype, amt = ev.split(":")
                 asyncio.ensure_future(self._send(player_id, {"type": "notice",
                     "msg": f"Hole in barrow — spilled {amt} {rtype}!"}))
+            elif ev.startswith("overspill:"):
+                _, rtype, amt = ev.split(":")
+                asyncio.ensure_future(self._send(player_id, {"type": "notice",
+                    "msg": f"Broken handle — dropped {amt} {rtype} (half capacity until you repair the handle)."}))
 
     # ---- NPC market ---------------------------------------------------------
 
@@ -703,7 +708,7 @@ class GameEngine:
         if w <= 0:
             await self._send(player_id, {"type": "notice", "msg": "Silo is empty."})
             return
-        cap = player["bucket_cap"]
+        cap = effective_bucket_cap(player)
         load = _bucket_total(player.get("bucket", {}))
         space = cap - load
         if space <= 0:
@@ -892,7 +897,7 @@ class GameEngine:
             return
         qty = catalog["qty"]
         if item == "fertilizer":
-            space = player["bucket_cap"] - _bucket_total(player.get("bucket", {}))
+            space = effective_bucket_cap(player) - _bucket_total(player.get("bucket", {}))
             if space < qty:
                 await self._send(player_id, {"type": "notice",
                     "msg": f"Need {qty} free barrow space for fertilizer (have {space})."})
@@ -1024,7 +1029,7 @@ class GameEngine:
                     return
                 cdef = CROP_DEFS.get(crop["crop_type"], CROP_DEFS["wheat"])
                 qty  = cdef["yield_fertilized"] if crop.get("fertilized_at") else cdef["yield_base"]
-                space = player["bucket_cap"] - _bucket_total(player.get("bucket", {}))
+                space = effective_bucket_cap(player) - _bucket_total(player.get("bucket", {}))
                 take  = min(qty, space)
                 if take <= 0:
                     await self._send(player_id, {"type": "notice", "msg": "No space in bucket."})
@@ -1165,7 +1170,7 @@ class GameEngine:
             await self._send(player_id, {"type": "sold", "earned": earned_after, "coins": player["coins"]})
         elif action == "buy":
             inv_qty = inventory.get(resource_type, 0)
-            space   = player["bucket_cap"] - _bucket_total(player.get("bucket", {}))
+            space   = effective_bucket_cap(player) - _bucket_total(player.get("bucket", {}))
             qty     = min(float(amount), inv_qty, space, player["coins"] / price)
             if qty <= 0:
                 await self._send(player_id, {"type": "notice", "msg": "Can't buy."})
@@ -1370,7 +1375,7 @@ class GameEngine:
             if player["id"] not in self.sockets:
                 continue
             px, py = player["x"], player["y"]
-            cap   = player["bucket_cap"]
+            cap   = effective_bucket_cap(player)
             load  = _bucket_total(player.get("bucket", {}))
             space = cap - load
 
@@ -1445,7 +1450,7 @@ class GameEngine:
                     continue
                 if abs(py - node["y"]) > COLLECTION_RADIUS:
                     continue
-                cap   = player["bucket_cap"]
+                cap   = effective_bucket_cap(player)
                 load  = _bucket_total(player.get("bucket", {}))
                 space = cap - load
                 if space <= 0 or node["current_amount"] <= 0:
@@ -1567,10 +1572,13 @@ class GameEngine:
     # ----------------------------------------------------------------- wires
 
     def _player_wire(self, p: dict) -> dict:
+        eff = effective_bucket_cap(p)
         return {
             "id": p["id"], "x": p["x"], "y": p["y"],
             "coins": p["coins"], "bucket": p.get("bucket", {}),
-            "bucket_cap": p["bucket_cap"], "pocket": p.get("pocket", {}),
+            "bucket_cap": p["bucket_cap"],
+            "bucket_cap_effective": eff,
+            "pocket": p.get("pocket", {}),
             "wb_paint":  round(p.get("wb_paint",  100), 1),
             "wb_tire":   round(p.get("wb_tire",   100), 1),
             "wb_handle": round(p.get("wb_handle", 100), 1),

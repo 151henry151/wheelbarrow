@@ -15,7 +15,7 @@ Inspired by the spirit of [A Tractor](https://store.steampowered.com/app/779050/
 ### The basics
 - Move with **arrow keys** — speed depends on your load; heavier materials (gravel, stone) slow you significantly; an empty aluminium barrow is faster than a loaded plastic one
 - **Park near a resource** and your bucket slowly fills — proximity collection is passive
-- **Haul your load** to the NPC market (`50,60`) and press **Space** to sell
+- **Haul your load** to the NPC market (`50,60`) and press **Space** to sell; on a **large pile of your own** (`E` → **Sell all at NPC market…**), confirm to autopilot load → sell → repeat until the pile is empty (**any key except H** cancels)
 - Wild resources **deplete** over time, forcing you to travel further from spawn to find fresh nodes
 - The server runs 24/7 — park near resources before logging off and collect the difference when you return
 
@@ -30,7 +30,7 @@ Inspired by the spirit of [A Tractor](https://store.steampowered.com/app/779050/
 | U | Unload bucket — resource pile on own land; **wheat** goes into a **completed silo** if you stand on your silo |
 | G | Deliver barrow materials to a **construction site** under your feet (your own site) |
 | O | Withdraw **wheat** from your **silo** into the barrow |
-| E | Context interact — town hall / NPC shop / manage pile prices / trade at player market |
+| E | Context interact — town hall / NPC shop / **pile menu** (set prices, buy, or **Sell all at NPC market** autopilot on your piles) / trade at player market |
 | F | Farm action — plant wheat / fertilize / harvest |
 | H | Toggle HUD (hidden by default — just press H to see it) |
 | 1–9 | Select item in any open menu |
@@ -53,7 +53,7 @@ Your wheelbarrow degrades as you move:
 - **Paint** fades — when it drops below 50% on a **steel** barrow, the metal starts to rust
 - **Barrow** (structural) — plastic wears physically over time; steel rusts when paint is low (repair paint first); aluminium barely degrades; when below 60%, cargo can spill during long journeys
 - **Tyre** wears — random flat tyre when condition is low; flat tyre triples move time until repaired
-- **Handle** wears — random break when condition is low; broken handle = immobile until repaired
+- **Handle** wears — random snap when condition is low; a snapped handle limits you to **50% of your normal bucket capacity** until you repair it at the Repair Shop (you can still move)
 
 Repair all components at the **Repair Shop** (500, 444). Upgrades reduce wear rates.
 
@@ -178,4 +178,4 @@ See `wheelbarrow.service` for the service unit template. Deployment is handled m
 
 ## Version
 
-Current version: **0.7.0** (also in `VERSION` and `pyproject.toml`). See [CHANGELOG.md](CHANGELOG.md).
+Current version: **0.8.0** (also in `VERSION` and `pyproject.toml`). See [CHANGELOG.md](CHANGELOG.md).

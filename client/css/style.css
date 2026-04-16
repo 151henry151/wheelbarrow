@@ -67,6 +67,20 @@ canvas { display: block; image-rendering: pixelated; }
   z-index: 5;
 }
 
+#autopilot-banner {
+  position: fixed;
+  top: 40px;
+  left: 12px;
+  background: rgba(80, 40, 20, 0.92);
+  border: 1px solid #e07030;
+  padding: 6px 12px;
+  font-size: 0.74rem;
+  color: #ffb080;
+  z-index: 6;
+  max-width: 320px;
+  pointer-events: none;
+}
+
 /* ------------------------------------------------------------ Town info bar */
 #town-info {
   position: fixed;
@@ -157,6 +171,21 @@ canvas { display: block; image-rendering: pixelated; }
 .build-option.unaffordable { color: #555; }
 .build-option span.key     { color: #f5c842; }
 .build-menu-close { color: #666; font-size: 0.72rem; margin-top: 8px; }
+
+.pile-menu-entry { margin-bottom: 10px; }
+.pile-sell-all-btn {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  padding: 6px 8px;
+  font-family: monospace;
+  font-size: 0.72rem;
+  cursor: pointer;
+  background: #3a5028;
+  color: #e8f0d8;
+  border: 1px solid #7ab648;
+}
+.pile-sell-all-btn:hover { background: #4a6038; }
 
 /* ----------------------------------------------------------- Notice bar */
 #notice-bar {

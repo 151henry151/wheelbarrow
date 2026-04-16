@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-04-16
+
+### Added
+- **Sell all at NPC market (autopilot)**: on your own pile in the pile menu (`E`), use **Sell all at NPC market…** — confirm to loop: load from the pile, path to the nearest NPC market tile (Manhattan steps), sell, return to the pile until the pile is empty, then stand on the tile. A banner shows while autopilot runs; **any key except H** stops it (H still toggles HUD). Movement uses the same tick cadence as normal play; manual arrow input is blocked while autopilot runs (`Input` autopilot block + tick-aligned steps)
+
+### Changed
+- **Broken handle**: when the handle snaps (`wb_handle` = 0), you remain mobile but effective barrow capacity is **50%** of your upgraded bucket until you repair the handle at the Repair Shop; excess cargo is dropped with a dedicated notice (`bucket_cap_effective` on the wire for HUD/load speed)
+
 ## [0.7.0] - 2026-04-16
 
 ### Added
