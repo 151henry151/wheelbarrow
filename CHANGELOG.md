@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-04-16
+
+### Added
+- **Staged construction** for all player-placed buildings: pay **init coins** to place a construction site, then deliver **foundation** materials (stone/gravel), then **building** materials from the barrow in multiple trips; press **[G]** on the tile to deposit whatever matches the current phase
+- **`server/game/construction.py`**: shared helpers (`init_construction_state`, `deposit_all_from_bucket`, `construction_is_complete`) for foundation-then-building delivery
+- **Grain silo** build: **500c** to start, **60 stone** foundation, **80 wood** building; completed silo stores **wheat** in structure inventory (capacity **5000**); **[U]** on your silo unloads wheat from the barrow into storage; **[O]** withdraws wheat from the silo into the barrow
+- **Winter pile spoilage**: at the start of **winter**, **wheat** left in **ground piles** (not in a silo) rots into **compost** on the same tile; field crops still freeze as before
+- **Client**: construction-site and silo sprites; build menu lists silo and updated cost copy for staged builds; `tick` / `notice` payloads can carry **structure** updates for in-progress sites
+
+### Changed
+- **Player Market**, **Town Hall**, and production structures (**stable**, **gravel pit**, **compost heap**, **topsoil mound**) now use the same staged construction rules (per-structure **init_coins**, **foundation**, and **building** tables in `STRUCTURE_DEFS`) instead of deducting full coin + material costs at once
+- Game persist interval now writes **all structures** to the database (inventory/config), not only players and wild resource nodes
+
 ## [0.6.0] - 2026-04-16
 
 ### Added

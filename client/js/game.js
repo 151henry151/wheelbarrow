@@ -11,6 +11,7 @@ const WB_HANDLE_CHASSIS_WEIGHT = { 1:  0.0, 2:  1.5, 3: -0.5 };
 const RESOURCE_WEIGHTS = {
   wood:    0.5,
   wheat:   0.6,
+  fertilizer: 0.65,
   compost: 0.7,
   manure:  0.8,
   topsoil: 1.2,
@@ -24,18 +25,19 @@ const RESOURCE_WEIGHT_MAX_UNIT = 2.5;   // gravel — used to normalize speed
 
 // Mirrored from server constants for UI display
 const STRUCTURE_DEFS = {
-  stable:        { label: 'Horse Stable',    cost: '200c',                      produces: 'manure'  },
-  gravel_pit:    { label: 'Gravel Pit',      cost: '300c + 20 gravel',          produces: 'gravel'  },
-  compost_heap:  { label: 'Compost Heap',    cost: '150c + 10 manure',          produces: 'compost' },
-  topsoil_mound: { label: 'Topsoil Mound',   cost: '250c + 20 topsoil',         produces: 'topsoil' },
-  market:        { label: 'Player Market',   cost: '2000c + 50 wood + 30 stone', produces: null     },
-  town_hall:     { label: 'Town Hall',       cost: '5000c + 50 stone + 50 wood + 100 dirt', produces: null },
+  stable:        { label: 'Horse Stable',    cost: '200c start + foundation + building', produces: 'manure'  },
+  gravel_pit:    { label: 'Gravel Pit',      cost: '300c start + foundation + building', produces: 'gravel'  },
+  compost_heap:  { label: 'Compost Heap',    cost: '150c start + foundation + building', produces: 'compost' },
+  topsoil_mound: { label: 'Topsoil Mound',   cost: '250c start + foundation + building', produces: 'topsoil' },
+  market:        { label: 'Player Market',   cost: '2000c start + foundation + building', produces: null     },
+  town_hall:     { label: 'Town Hall',       cost: '5000c start + foundation + building', produces: null },
+  silo:          { label: 'Grain Silo',      cost: '500c start + 60 stone + 80 wood',      produces: null },
 };
 const STRUCT_KEYS = Object.keys(STRUCTURE_DEFS);
 
 const SEED_SHOP = {
   wheat_seed: { label: 'Wheat Seeds ×10', cost: 25 },
-  fertilizer: { label: 'Fertilizer ×5',  cost: 20 },
+  fertilizer: { label: 'Fertilizer ×5',  cost: 50 },
 };
 const REPAIR_OPTIONS = [
   { key: 'paint',  label: 'Repair Paint  (30c per 10%)' },
@@ -56,6 +58,7 @@ const UPGRADE_COSTS = {
   handle: {2:500,  3:4500},
   barrow: {2:700,  3:6000},
 };
+const WB_BUCKET_CAPS = {1:10, 2:16, 3:26, 4:40, 5:60, 6:85};
 
 function _upgradeLevelLabel(comp, level) {
   if (comp === 'barrow') return WB_BARROW_MATERIAL_NAMES[level] || `L${level}`;
@@ -71,12 +74,20 @@ const state = {
   world_parcels: [],   // all parcels (received once at init, updated on purchase)
   towns:        [],    // all towns (received once at init)
   piles:        [],
+  roads:        [],
+  soil_tiles:   [],
   crops:        [],
-  market:       null,
+  npc_markets:  [],
   npc_shops:    [],
   prices:       {},
   season:       null,
   world:        { w: 1000, h: 1000 },
+
+  // Wheelbarrow sprite facing (screen/world: up = −y, down = +y)
+  facing:         'down',
+  _otherFacing:   {},   // player id -> 'up'|'down'|'left'|'right'
+  _prevOtherPos:  {},
+  _prevSelfPos:   null,
 
   // UI state
   buildMenuOpen: false,
@@ -93,11 +104,25 @@ const state = {
 
 // ---------------------------------------------------------------- helpers
 
+function _facingFromDelta(dx, dy) {
+  if (dx === 0 && dy === 0) return null;
+  if (Math.abs(dx) > Math.abs(dy)) return dx > 0 ? 'right' : 'left';
+  return dy > 0 ? 'down' : 'up';
+}
+
 function _parcelAt(x, y) {
   for (const p of state.world_parcels) {
     if (x >= p.x && x < p.x + p.w && y >= p.y && y < p.y + p.h) return p;
   }
   return null;
+}
+
+/** Matches server free pile pickup (priced → owner only; on owner's land → owner only; else public). */
+function _canFreePickPile(pile, player) {
+  if (pile.sell_price != null) return pile.owner_id === player.id;
+  const par = _parcelAt(pile.x, pile.y);
+  if (par && par.owner_id === pile.owner_id) return player.id === pile.owner_id;
+  return true;
 }
 
 function _pointInPolygon(x, y, poly) {
@@ -119,6 +144,22 @@ function _townAt(x, y) {
     if (_pointInPolygon(x, y, town.boundary)) return town;
   }
   return null;
+}
+
+/** 0 = untilled / needs till, 1 = tilled ready for seeds (from server soil_tiles). */
+function _soilTilledAt(x, y) {
+  const e = state.soil_tiles.find(t => t.x === x && t.y === y);
+  return e ? e.tilled : 0;
+}
+
+function _nearNpcMarket(px, py) {
+  const mks = state.npc_markets || [];
+  return mks.some(m => Math.abs(m.x - px) <= 1 && Math.abs(m.y - py) <= 1);
+}
+
+function _onNpcMarketTile(px, py) {
+  const mks = state.npc_markets || [];
+  return mks.some(m => m.x === px && m.y === py);
 }
 
 // ---------------------------------------------------------------- notice bar
@@ -197,7 +238,7 @@ function updateHud() {
 
   // Prices only visible when standing at/near a market
   const px = state.player.x, py = state.player.y;
-  const nearNpcMarket = state.market && Math.abs(px - state.market.x) <= 1 && Math.abs(py - state.market.y) <= 1;
+  const nearNpcMarket = _nearNpcMarket(px, py);
   const nearPlayerMarket = state.nodes.some(n => n.is_market && Math.abs(n.x - px) <= 1 && Math.abs(n.y - py) <= 1);
   if (nearNpcMarket || nearPlayerMarket) {
     document.getElementById('hud-prices').textContent =
@@ -232,8 +273,9 @@ function _updateWbHud() {
   const barrowName = WB_BARROW_MATERIAL_NAMES[p.wb_barrow_level] || `L${p.wb_barrow_level}`;
   const tireName   = WB_TIRE_TYPE_NAMES[p.wb_tire_level]         || `L${p.wb_tire_level}`;
   const handleName = WB_HANDLE_MATERIAL_NAMES[p.wb_handle_level] || `L${p.wb_handle_level}`;
+  const bucketCap  = WB_BUCKET_CAPS[p.wb_bucket_level] || 10;
   document.getElementById('wb-upgrades').textContent =
-    `${barrowName}  ${tireName}  ${handleName}  cap L${p.wb_bucket_level}`;
+    `barrow: ${barrowName}  tire: ${tireName}  handle: ${handleName}  cap: ${bucketCap}`;
 }
 
 function _updateHint() {
@@ -246,9 +288,22 @@ function _updateHint() {
   const px  = p.x, py = p.y;
   const hints = [];
 
-  const atMarket = state.market && px === state.market.x && py === state.market.y;
+  const atMarket = _onNpcMarketTile(px, py);
   const total    = Object.values(p.bucket || {}).reduce((a,b) => a+b, 0);
   if (atMarket && total > 0) hints.push('[Space] sell all at NPC market');
+  if (total > 0) {
+    hints.push('[U] unload (pile at your feet; wheat → silo if standing on one)');
+    const siteHere = state.nodes.find(
+      n => n.construction_active && n.x === px && n.y === py && n.owner_id === p.id,
+    );
+    if (siteHere) hints.push('[G] deliver barrow materials to this construction site');
+    const siloHere = state.nodes.find(
+      n => n.is_silo && n.x === px && n.y === py && n.owner_id === p.id,
+    );
+    if (siloHere && (siloHere.silo_wheat || 0) > 0) {
+      hints.push('[O] withdraw wheat from silo to barrow');
+    }
+  }
 
   const nearShop = state.npc_shops.find(s => Math.abs(s.x - px) <= 1 && Math.abs(s.y - py) <= 1);
   if (nearShop) hints.push(`[E] open ${nearShop.label}`);
@@ -256,12 +311,14 @@ function _updateHint() {
   const nearHall = state.nodes.find(n => n.is_town_hall && Math.abs(n.x-px) <= 1 && Math.abs(n.y-py) <= 1);
   if (nearHall) hints.push('[E] town hall');
 
+  if (state.season && state.season.name === 'fall') {
+    hints.push('Winter kills crops in the ground; uncovered wheat piles rot — use a silo or sell.');
+  }
+
   const parcel = _parcelAt(px, py);
   if (parcel) {
     if (parcel.owner_id === p.id) {
-      if (total > 0) hints.push('[U] unload to pile');
       hints.push('[P] build menu');
-      hints.push('[F] farm');
     } else if (!parcel.owner_id) {
       if (state.parcelPreview === parcel.id) {
         hints.push(`[B] confirm purchase: ${parcel.price}c`);
@@ -280,13 +337,32 @@ function _updateHint() {
     const otherPiles = pilesHere.filter(p2 => p2.owner_id !== p.id && p2.sell_price != null);
     if (ownPiles.length)   hints.push('[E] manage pile prices');
     if (otherPiles.length) hints.push('[E] buy from pile');
+    const pick = pilesHere.find(pl => _canFreePickPile(pl, p) && pl.amount > 0);
+    if (pick) {
+      const cap  = p.bucket_cap || 10;
+      const load = Object.values(p.bucket || {}).reduce((a, b) => a + b, 0);
+      if (load < cap) hints.push(`Loading ${pick.resource_type} from pile…`);
+    }
   }
 
   const near = state.nodes.find(n => !n.is_structure && Math.abs(n.x-px)<=1 && Math.abs(n.y-py)<=1 && n.amount > 0);
   if (near) hints.push(`Collecting ${near.type}...`);
 
   const crop = state.crops.find(c => c.x === px && c.y === py);
-  if (crop) hints.push(crop.ready ? '[F] harvest crop' : '[F] fertilize/check crop');
+  if (crop) {
+    if (crop.winter_dead) {
+      hints.push('[F] till — clear frosted crop');
+    } else {
+      hints.push(crop.ready ? '[F] harvest crop'
+        : '[F] fertilize (barrow fertilizer or manure) / check crop');
+    }
+  } else if (parcel && parcel.owner_id === p.id) {
+    if (_soilTilledAt(px, py) === 1) {
+      hints.push('[F] plant wheat (tilled soil)');
+    } else {
+      hints.push('[F] till soil before planting');
+    }
+  }
 
   const nearMarket = state.nodes.find(n => n.is_market && Math.abs(n.x-px)<=1 && Math.abs(n.y-py)<=1);
   if (nearMarket) hints.push('[E] trade at player market');
@@ -598,6 +674,8 @@ function handleKey(key) {
   if (lk === 'b')  { _handleBuyParcel(); return; }
   if (lk === 'p')  { openBuildMenu(); return; }
   if (lk === 'u')  { WS.send({ type: 'unload' }); return; }
+  if (lk === 'g')  { WS.send({ type: 'deposit_build' }); return; }
+  if (lk === 'o')  { WS.send({ type: 'silo_withdraw' }); return; }
   if (lk === 'f')  { WS.send({ type: 'farm' }); return; }
   if (lk === 'e')  { _contextInteract(); return; }
 }
@@ -697,17 +775,26 @@ window.addEventListener('load', () => {
 
     const canvas = document.getElementById('game');
     Renderer.init(canvas, state);
-    Input.init(msg => WS.send(msg), handleKey);
+    Input.init(msg => {
+      if (msg.type === 'move' && msg.dir) state.facing = msg.dir;
+      WS.send(msg);
+    }, handleKey);
 
     WS.on('init', msg => {
       state.player        = msg.player;
       state.player.username = username;
+      state.facing        = 'down';
+      state._otherFacing  = {};
+      state._prevOtherPos = {};
+      state._prevSelfPos  = { x: msg.player.x, y: msg.player.y };
       state.nodes         = msg.nodes;
       state.world_parcels = msg.parcels || [];
       state.piles         = msg.piles   || [];
+      state.roads         = msg.roads   || [];
+      state.soil_tiles    = msg.soil_tiles || [];
       state.crops         = msg.crops   || [];
       state.towns         = msg.towns   || [];
-      state.market        = msg.market;
+      state.npc_markets   = msg.npc_markets || (msg.market ? [msg.market] : []);
       state.npc_shops     = msg.npc_shops || [];
       state.prices        = msg.prices;
       state.season        = msg.season;
@@ -717,11 +804,30 @@ window.addEventListener('load', () => {
 
     WS.on('tick', msg => {
       const uname = state.player ? state.player.username : null;
+      const prevSelf = state._prevSelfPos;
       state.player  = msg.player;
       if (uname) state.player.username = uname;
+      if (prevSelf) {
+        const f = _facingFromDelta(state.player.x - prevSelf.x, state.player.y - prevSelf.y);
+        if (f) state.facing = f;
+      }
+      state._prevSelfPos = { x: state.player.x, y: state.player.y };
+
+      for (const pl of msg.players) {
+        if (state.player && pl.id === state.player.id) continue;
+        const pr = state._prevOtherPos[pl.id];
+        if (pr) {
+          const f = _facingFromDelta(pl.x - pr.x, pl.y - pr.y);
+          if (f) state._otherFacing[pl.id] = f;
+        }
+        state._prevOtherPos[pl.id] = { x: pl.x, y: pl.y };
+      }
+
       state.players = msg.players;
       state.nodes   = msg.nodes;
       state.piles   = msg.piles  || [];
+      state.roads   = msg.roads  || [];
+      state.soil_tiles = msg.soil_tiles || [];
       state.crops   = msg.crops  || [];
       state.prices  = msg.prices;
       state.season  = msg.season;
@@ -765,8 +871,10 @@ window.addEventListener('load', () => {
 
     WS.on('built', msg => {
       state.player.coins = msg.coins;
-      state.nodes.push(msg.structure);
-      showNotice(`Built ${msg.structure.type}!`);
+      const idx = state.nodes.findIndex(n => n.id === msg.structure.id);
+      if (idx >= 0) state.nodes[idx] = msg.structure;
+      else state.nodes.push(msg.structure);
+      showNotice(msg.msg || `Built ${msg.structure.type}!`);
     });
 
     WS.on('season_change', msg => {
@@ -784,7 +892,14 @@ window.addEventListener('load', () => {
       }
     });
 
-    WS.on('notice', msg => showNotice(msg.msg));
+    WS.on('notice', msg => {
+      if (msg.structure) {
+        const idx = state.nodes.findIndex(n => n.id === msg.structure.id);
+        if (idx >= 0) state.nodes[idx] = msg.structure;
+        else state.nodes.push(msg.structure);
+      }
+      showNotice(msg.msg);
+    });
 
     WS.connect(token);
 

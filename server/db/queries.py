@@ -91,6 +91,29 @@ async def insert_nodes_bulk(nodes: list[dict]):
 # Towns
 # ---------------------------------------------------------------------------
 
+async def ensure_towns_npc_district_column():
+    """Add npc_district to existing DB volumes (init.sql only runs on fresh DB)."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            try:
+                await cur.execute(
+                    "ALTER TABLE towns ADD COLUMN npc_district JSON NULL",
+                )
+            except Exception:
+                pass
+
+
+async def update_town_npc_district(town_id: int, district: dict):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "UPDATE towns SET npc_district=%s WHERE id=%s",
+                (json.dumps(district), town_id),
+            )
+
+
 async def load_all_towns() -> list[dict]:
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -99,6 +122,13 @@ async def load_all_towns() -> list[dict]:
             rows = await cur.fetchall()
             for r in rows:
                 r["boundary"] = json.loads(r["boundary"]) if isinstance(r["boundary"], str) else (r["boundary"] or [])
+                nd = r.get("npc_district")
+                if isinstance(nd, str):
+                    try:
+                        nd = json.loads(nd)
+                    except json.JSONDecodeError:
+                        nd = None
+                r["npc_district"] = nd
             return rows
 
 
@@ -111,9 +141,11 @@ async def insert_towns_bulk(towns: list[dict]) -> list[int]:
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             for t in towns:
+                nd = t.get("npc_district")
                 await cur.execute(
-                    "INSERT INTO towns (name, center_x, center_y, boundary) VALUES (%s,%s,%s,%s)",
-                    (t["name"], t["center_x"], t["center_y"], json.dumps(t["boundary"])),
+                    "INSERT INTO towns (name, center_x, center_y, boundary, npc_district) VALUES (%s,%s,%s,%s,%s)",
+                    (t["name"], t["center_x"], t["center_y"], json.dumps(t["boundary"]),
+                     json.dumps(nd) if nd else None),
                 )
                 ids.append(cur.lastrowid)
     return ids
@@ -212,13 +244,17 @@ async def load_all_structures() -> list[dict]:
             return rows
 
 
-async def create_structure(parcel_id: int, x: int, y: int, structure_type: str) -> dict:
+async def create_structure(
+    parcel_id: int, x: int, y: int, structure_type: str, config: dict | None = None,
+) -> dict:
+    config = config or {}
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cur:
             await cur.execute(
-                "INSERT INTO structures (parcel_id,x,y,structure_type) VALUES (%s,%s,%s,%s)",
-                (parcel_id, x, y, structure_type),
+                """INSERT INTO structures (parcel_id,x,y,structure_type,config,inventory)
+                   VALUES (%s,%s,%s,%s,%s,'{}')""",
+                (parcel_id, x, y, structure_type, json.dumps(config)),
             )
             sid = cur.lastrowid
             await cur.execute(
@@ -230,8 +266,8 @@ async def create_structure(parcel_id: int, x: int, y: int, structure_type: str) 
                 (sid,),
             )
             row = await cur.fetchone()
-            row["inventory"] = {}
-            row["config"]    = {}
+            row["inventory"] = json.loads(row["inventory"]) if isinstance(row["inventory"], str) else (row["inventory"] or {})
+            row["config"] = json.loads(row["config"]) if isinstance(row["config"], str) else (row["config"] or {})
             return row
 
 
@@ -282,16 +318,131 @@ async def delete_pile(x, y, resource_type):
                 (x, y, resource_type),
             )
 
+
+async def ensure_world_roads_table():
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """CREATE TABLE IF NOT EXISTS world_roads (
+                    x INT NOT NULL,
+                    y INT NOT NULL,
+                    PRIMARY KEY (x, y)
+                )""",
+            )
+
+
+async def migrate_resource_piles_parcel_optional():
+    """Allow piles off formal parcels (unload anywhere); drop parcel FK if present."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """SELECT CONSTRAINT_NAME FROM information_schema.TABLE_CONSTRAINTS
+                   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME='resource_piles'
+                   AND CONSTRAINT_TYPE='FOREIGN KEY'""",
+            )
+            for (cname,) in await cur.fetchall() or []:
+                try:
+                    await cur.execute(
+                        f"ALTER TABLE resource_piles DROP FOREIGN KEY `{cname}`",
+                    )
+                except Exception:
+                    pass
+            try:
+                await cur.execute(
+                    "ALTER TABLE resource_piles MODIFY parcel_id INT NULL",
+                )
+            except Exception:
+                pass
+
+
+async def load_all_roads() -> list[tuple[int, int]]:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("SELECT x, y FROM world_roads")
+            return [(r[0], r[1]) for r in await cur.fetchall()]
+
+
+async def insert_road_bulk(tiles: list[tuple[int, int]]):
+    if not tiles:
+        return
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.executemany(
+                "INSERT IGNORE INTO world_roads (x, y) VALUES (%s, %s)",
+                list(tiles),
+            )
+
+
 # ---------------------------------------------------------------------------
-# Crops
+# Crops & soil
 # ---------------------------------------------------------------------------
+
+async def ensure_crop_winter_dead_column():
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """SELECT COUNT(*) FROM information_schema.COLUMNS
+                   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'crops' AND COLUMN_NAME = 'winter_dead'""",
+            )
+            (n,) = await cur.fetchone()
+            if n == 0:
+                await cur.execute(
+                    "ALTER TABLE crops ADD COLUMN winter_dead TINYINT NOT NULL DEFAULT 0",
+                )
+
+
+async def ensure_soil_tiles_table():
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """CREATE TABLE IF NOT EXISTS soil_tiles (
+                    x INT NOT NULL,
+                    y INT NOT NULL,
+                    tilled TINYINT NOT NULL DEFAULT 0,
+                    PRIMARY KEY (x, y)
+                )""",
+            )
+
+
+async def load_all_soil_tiles() -> list[dict]:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor(aiomysql.DictCursor) as cur:
+            await cur.execute("SELECT x, y, tilled FROM soil_tiles")
+            return await cur.fetchall()
+
+
+async def upsert_soil_tile(x: int, y: int, tilled: int):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """INSERT INTO soil_tiles (x, y, tilled) VALUES (%s, %s, %s)
+                   ON DUPLICATE KEY UPDATE tilled=VALUES(tilled)""",
+                (x, y, tilled),
+            )
+
 
 async def load_all_crops() -> list[dict]:
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cur:
-            await cur.execute("SELECT * FROM crops WHERE harvested=0")
+            await cur.execute("SELECT * FROM crops WHERE COALESCE(harvested, 0) = 0")
             return await cur.fetchall()
+
+
+async def cleanup_legacy_harvested_crop_rows():
+    """Old harvest flow set harvested=1 and kept the row, blocking UNIQUE (x,y) replants. Remove those."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("DELETE FROM crops WHERE harvested=1")
 
 
 async def create_crop(parcel_id, owner_id, x, y, crop_type, ready_at_dt) -> dict:
@@ -299,7 +450,8 @@ async def create_crop(parcel_id, owner_id, x, y, crop_type, ready_at_dt) -> dict
     async with pool.acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cur:
             await cur.execute(
-                "INSERT INTO crops (parcel_id,owner_id,x,y,crop_type,ready_at) VALUES (%s,%s,%s,%s,%s,%s)",
+                """INSERT INTO crops (parcel_id,owner_id,x,y,crop_type,ready_at,winter_dead)
+                   VALUES (%s,%s,%s,%s,%s,%s,0)""",
                 (parcel_id, owner_id, x, y, crop_type, ready_at_dt),
             )
             cid = cur.lastrowid
@@ -318,10 +470,29 @@ async def fertilize_crop(crop_id, new_ready_at_dt):
 
 
 async def harvest_crop(crop_id):
+    """Remove the crop row so another can be planted at the same (x,y) (UNIQUE idx_crop_xy)."""
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
-            await cur.execute("UPDATE crops SET harvested=1 WHERE id=%s", (crop_id,))
+            await cur.execute("DELETE FROM crops WHERE id=%s", (crop_id,))
+
+
+async def mark_all_crops_winter_dead():
+    """Frost-kill standing crops; they stay on the map until tilled away."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "UPDATE crops SET winter_dead=1 WHERE COALESCE(harvested,0)=0 AND COALESCE(winter_dead,0)=0",
+            )
+
+
+async def delete_all_active_crops():
+    """Legacy: winter used to DELETE crops. Prefer mark_all_crops_winter_dead."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("DELETE FROM crops WHERE COALESCE(harvested, 0) = 0")
 
 # ---------------------------------------------------------------------------
 # Season
@@ -347,6 +518,22 @@ async def save_season_state(season: int):
 # ---------------------------------------------------------------------------
 # Market prices
 # ---------------------------------------------------------------------------
+
+async def ensure_market_price_rows(defaults: dict[str, float]):
+    """Insert missing resource rows (e.g. new types on existing DB volumes)."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("SELECT resource_type FROM market_prices")
+            have = {r[0] for r in await cur.fetchall()}
+            for rtype, price in defaults.items():
+                if rtype in have:
+                    continue
+                await cur.execute(
+                    "INSERT INTO market_prices (resource_type, price_per_unit) VALUES (%s, %s)",
+                    (rtype, price),
+                )
+
 
 async def get_market_prices() -> dict[str, float]:
     pool = await get_pool()

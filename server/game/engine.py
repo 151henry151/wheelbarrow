@@ -1,12 +1,14 @@
 """
 In-memory game state. All mutation happens here; the DB handles persistence.
 
-v0.5.0: worlds are 1000×1000; parcels are variable-size from world_parcels;
+v0.7.0: staged construction, silos, winter pile spoilage; worlds are 1000×1000;
 towns have polygon boundaries; transactions carry town taxes.
 """
 import asyncio
 import datetime
+import json
 import math
+import random
 import time
 import uuid
 from typing import Optional
@@ -14,8 +16,10 @@ from typing import Optional
 from fastapi import WebSocket
 
 from server.game.constants import (
-    WORLD_W, WORLD_H, COLLECTION_RADIUS, COLLECTION_RATE,
-    MARKET_TILE, STRUCTURE_DEFS, MARKET_BASE_PRICES,
+    WORLD_W, WORLD_H, COLLECTION_RADIUS, COLLECTION_RATE, COLLECTION_RATES,
+    PILE_COLLECTION_MULT,
+    ROAD_GROWTH_TILES_MIN, ROAD_GROWTH_TILES_MAX,
+    MARKET_TILE, STRUCTURE_DEFS, MARKET_BASE_PRICES, WINTER_PILE_SPOIL_TYPES,
     MARKET_DRIFT_INTERVAL, MARKET_DRIFT_THRESHOLD,
     NPC_SHOP_LOCATIONS, NPC_SHOP_LABELS, NPC_SHOP_ADJACENCY,
     SEED_SHOP_ITEMS, CROP_DEFS,
@@ -27,16 +31,78 @@ from server.game.constants import (
 )
 from server.game.seasons import SeasonClock
 from server.game.wb_condition import apply_move_decay, is_immobile
+from server.game.town_npcs import (
+    place_npc_district,
+    parse_npc_district,
+    district_spread_ok,
+    DISTRICT_KEYS,
+)
+from server.game.roads_util import path_union_for_sites, pick_adjacent_growth_tile
+from server.game.construction import (
+    init_construction_state,
+    deposit_all_from_bucket,
+    construction_is_complete,
+    foundation_remaining,
+    building_remaining,
+)
 from server.db import queries
 
 
 def _bucket_total(bucket: dict) -> float:
     return sum(bucket.values())
 
-def _near_shop(player: dict, shop_key: str) -> bool:
-    sx, sy = NPC_SHOP_LOCATIONS[shop_key]
-    return (abs(player["x"] - sx) <= NPC_SHOP_ADJACENCY and
-            abs(player["y"] - sy) <= NPC_SHOP_ADJACENCY)
+
+def _migrate_pocket_fertilizer_to_bucket(player: dict) -> None:
+    """Fertilizer is carried in the wheelbarrow; move legacy pocket stock into the bucket."""
+    pocket = player.setdefault("pocket", {})
+    raw = pocket.pop("fertilizer", None)
+    if raw is None:
+        return
+    try:
+        amt = max(0.0, float(raw))
+    except (TypeError, ValueError):
+        return
+    if amt <= 0:
+        return
+    cap = player.get("bucket_cap", 10) - _bucket_total(player.get("bucket", {}))
+    move = min(amt, cap)
+    if move <= 0:
+        pocket["fertilizer"] = amt
+        return
+    b = player.setdefault("bucket", {})
+    b["fertilizer"] = round(b.get("fertilizer", 0) + move, 2)
+    rest = amt - move
+    if rest > 0:
+        pocket["fertilizer"] = rest
+
+
+def _near_shop(player: dict, shop_key: str, towns: dict[int, dict]) -> bool:
+    px, py = player["x"], player["y"]
+    for town in towns.values():
+        d = town.get("npc_district")
+        if not d:
+            continue
+        pos = d.get(shop_key)
+        if not pos or len(pos) < 2:
+            continue
+        sx, sy = int(pos[0]), int(pos[1])
+        if abs(px - sx) <= NPC_SHOP_ADJACENCY and abs(py - sy) <= NPC_SHOP_ADJACENCY:
+            return True
+    if shop_key in NPC_SHOP_LOCATIONS:
+        sx, sy = NPC_SHOP_LOCATIONS[shop_key]
+        if abs(px - sx) <= NPC_SHOP_ADJACENCY and abs(py - sy) <= NPC_SHOP_ADJACENCY:
+            return True
+    return False
+
+
+def _at_any_npc_market(player: dict, towns: dict[int, dict]) -> bool:
+    px, py = player["x"], player["y"]
+    for town in towns.values():
+        d = town.get("npc_district") or {}
+        m = d.get("market")
+        if m and len(m) >= 2 and px == int(m[0]) and py == int(m[1]):
+            return True
+    return (px, py) == MARKET_TILE
 
 def _point_in_polygon(x: float, y: float, poly: list[dict]) -> bool:
     n = len(poly)
@@ -68,6 +134,9 @@ class GameEngine:
         self.piles: dict[tuple, dict[str, dict]] = {}
         # Crops: (x,y) -> crop_dict
         self.crops: dict[tuple, dict] = {}
+        # Soil: (x,y) -> 1 tilled (ready for seeds), 0 untilled / needs till
+        self.soil: dict[tuple[int, int], int] = {}
+        self.road_tiles: set[tuple[int, int]] = set()
         self.prices: dict[str, float] = {}
         self.sales_volume: dict[str, float] = {r: 0.0 for r in MARKET_BASE_PRICES}
         self.season = SeasonClock()
@@ -84,9 +153,23 @@ class GameEngine:
         from server.game.world_gen import generate_world_if_needed
         await generate_world_if_needed()
 
-        # Load towns
+        await queries.ensure_towns_npc_district_column()
+
+        # Load towns + clustered NPC districts (backfill if missing)
         for t in await queries.load_all_towns():
             self.towns[t["id"]] = dict(t)
+        npc_district_rebuilt: set[int] = set()
+        for tid, town in list(self.towns.items()):
+            parsed = parse_npc_district(town.get("npc_district"))
+            if parsed and district_spread_ok(parsed):
+                town["npc_district"] = parsed
+                continue
+            # Missing district, or legacy DB layout (shops touching / 2×2) — re-place and persist
+            rng = random.Random(tid * 1103515245 + 12345)
+            d = place_npc_district(town, rng)
+            town["npc_district"] = d
+            await queries.update_town_npc_district(tid, d)
+            npc_district_rebuilt.add(tid)
 
         # Load parcels and build spatial index
         for p in await queries.load_all_parcels():
@@ -104,9 +187,29 @@ class GameEngine:
         for pile in await queries.load_all_piles():
             key = (pile["x"], pile["y"])
             self.piles.setdefault(key, {})[pile["resource_type"]] = dict(pile)
+        await queries.ensure_crop_winter_dead_column()
+        await queries.ensure_soil_tiles_table()
+        await queries.cleanup_legacy_harvested_crop_rows()
+        for row in await queries.load_all_soil_tiles():
+            self.soil[(int(row["x"]), int(row["y"]))] = int(row["tilled"])
         for crop in await queries.load_all_crops():
             self.crops[(crop["x"], crop["y"])] = dict(crop)
+
+        await queries.ensure_world_roads_table()
+        await queries.migrate_resource_piles_parcel_optional()
+        self.road_tiles = set(await queries.load_all_roads())
+        if not self.road_tiles:
+            await self._seed_initial_npc_roads()
+        for tid in npc_district_rebuilt:
+            t = self.towns.get(tid)
+            if t:
+                await self._merge_npc_roads_for_town(t)
+
+        await queries.ensure_market_price_rows(MARKET_BASE_PRICES)
         self.prices = await queries.get_market_prices()
+        for rtype, base in MARKET_BASE_PRICES.items():
+            if rtype not in self.prices:
+                self.prices[rtype] = base
         self.town_bans = await queries.load_town_bans()
 
         season_row = await queries.load_season_state()
@@ -115,24 +218,168 @@ class GameEngine:
 
     def _struct_to_node(self, struct: dict) -> dict:
         sdef = STRUCTURE_DEFS.get(struct["structure_type"], {})
-        return {
+        cfg = struct.get("config") or {}
+        if isinstance(cfg, str):
+            cfg = json.loads(cfg)
+        inv = struct.get("inventory") or {}
+        if isinstance(inv, str):
+            inv = json.loads(inv)
+        cons = cfg.get("construction")
+        construction_active = bool(cons)
+        node = {
             "id":             struct["id"],
             "x":              struct["x"],
             "y":              struct["y"],
             "node_type":      sdef.get("produces") or struct["structure_type"],
             "structure_type": struct["structure_type"],
             "current_amount": 0.0,
-            "max_amount":     sdef.get("max_amount", 0),
-            "replenish_rate": sdef.get("replenish_rate", 0),
-            "collect_fee":    sdef.get("collect_fee", 0),
+            "max_amount":     0 if construction_active else sdef.get("max_amount", 0),
+            "replenish_rate": 0 if construction_active else sdef.get("replenish_rate", 0),
+            "collect_fee":    0 if construction_active else sdef.get("collect_fee", 0),
             "owner_id":       struct["owner_id"],
             "owner_name":     struct["owner_name"],
             "is_structure":   True,
-            "is_market":      sdef.get("is_market", False),
-            "is_town_hall":   sdef.get("is_town_hall", False),
-            "inventory":      struct.get("inventory", {}),
-            "config":         struct.get("config", {}),
+            "is_market":      False if construction_active else sdef.get("is_market", False),
+            "is_town_hall":   False if construction_active else sdef.get("is_town_hall", False),
+            "is_silo":        bool(sdef.get("is_silo")) and not construction_active,
+            "construction_active": construction_active,
+            "inventory":      inv,
+            "config":         cfg,
         }
+        return node
+
+    async def _seed_initial_npc_roads(self):
+        """First boot: dirt paths inside each town polygon linking NPC district sites."""
+        new_tiles: set[tuple[int, int]] = set()
+        for town in self.towns.values():
+            poly = town.get("boundary") or []
+            d = town.get("npc_district") or {}
+            if len(poly) < 3:
+                continue
+            sites: list[tuple[int, int]] = []
+            for k in DISTRICT_KEYS:
+                v = d.get(k)
+                if v and len(v) >= 2:
+                    sites.append((int(v[0]), int(v[1])))
+            if len(sites) >= 2:
+                new_tiles |= path_union_for_sites(poly, sites, set())
+        self.road_tiles |= new_tiles
+        if new_tiles:
+            await queries.insert_road_bulk(list(new_tiles))
+
+    async def _merge_npc_roads_for_town(self, town: dict):
+        """After npc_district moves, extend dirt paths to the new shop sites (INSERT IGNORE duplicates)."""
+        poly = town.get("boundary") or []
+        d = town.get("npc_district") or {}
+        if len(poly) < 3:
+            return
+        sites: list[tuple[int, int]] = []
+        for k in DISTRICT_KEYS:
+            v = d.get(k)
+            if v and len(v) >= 2:
+                sites.append((int(v[0]), int(v[1])))
+        if len(sites) < 2:
+            return
+        new_tiles = path_union_for_sites(poly, sites, set())
+        extra = new_tiles - self.road_tiles
+        self.road_tiles |= new_tiles
+        if extra:
+            await queries.insert_road_bulk(list(extra))
+
+    def _structure_footprint_tiles(self) -> set[tuple[int, int]]:
+        return {(int(n["x"]), int(n["y"])) for n in self.structures.values()}
+
+    def _structure_tile_touches_road(self, sx: int, sy: int) -> bool:
+        for rx, ry in self.road_tiles:
+            if abs(rx - sx) + abs(ry - sy) == 1:
+                return True
+        return False
+
+    async def _kill_unharvested_crops_for_winter(self):
+        alive = [c for c in self.crops.values() if not c.get("winter_dead")]
+        if not alive:
+            return
+        await queries.mark_all_crops_winter_dead()
+        for key, c in list(self.crops.items()):
+            if not c.get("winter_dead"):
+                c["winter_dead"] = 1
+        await self._broadcast_all({
+            "type": "notice",
+            "msg": "Winter — crops in the field froze. Till the soil to clear them, then plant again. "
+                   "Uncovered wheat piles rot; grain in a silo is safe.",
+        })
+
+    async def _winter_rot_piles(self):
+        """Convert vulnerable pile contents (e.g. wheat) to compost on the same tile."""
+        rotted_tiles = 0
+        for (tx, ty), pile_map in list(self.piles.items()):
+            for rtype in list(pile_map.keys()):
+                if rtype not in WINTER_PILE_SPOIL_TYPES:
+                    continue
+                pile = pile_map[rtype]
+                amt = float(pile.get("amount", 0) or 0)
+                if amt <= 0:
+                    continue
+                parcel_id = pile.get("parcel_id")
+                owner_id = pile.get("owner_id")
+                await queries.delete_pile(tx, ty, rtype)
+                del pile_map[rtype]
+                comp = pile_map.get("compost")
+                prev = float(comp.get("amount", 0) or 0) if comp else 0.0
+                new_amt = round(prev + amt, 2)
+                sp = comp.get("sell_price") if comp else None
+                row = await queries.upsert_pile(
+                    parcel_id, owner_id, tx, ty, "compost", new_amt, sp,
+                )
+                pile_map["compost"] = dict(row)
+                rotted_tiles += 1
+            if not pile_map:
+                del self.piles[(tx, ty)]
+        if rotted_tiles:
+            await self._broadcast_all({
+                "type": "notice",
+                "msg": "Winter — uncovered wheat piles have rotted into compost where they lay.",
+            })
+
+    def _soil_ready_for_planting(self, tx: int, ty: int) -> bool:
+        return self.soil.get((tx, ty), 0) == 1
+
+    async def _grow_roads_new_year(self):
+        """Each spring: add a few dirt tiles extending toward player structures not yet by a road."""
+        blocked = self._structure_footprint_tiles()
+        budget = random.randint(ROAD_GROWTH_TILES_MIN, ROAD_GROWTH_TILES_MAX)
+        added: list[tuple[int, int]] = []
+        for _ in range(budget):
+            goals = [
+                (int(n["x"]), int(n["y"]))
+                for n in self.structures.values()
+                if not self._structure_tile_touches_road(int(n["x"]), int(n["y"]))
+            ]
+            if not goals:
+                break
+            random.shuffle(goals)
+            goal = goals[0]
+            ntile = pick_adjacent_growth_tile(
+                self.road_tiles, goal, blocked, WORLD_W, WORLD_H,
+            )
+            if ntile is None:
+                break
+            self.road_tiles.add(ntile)
+            added.append(ntile)
+        if added:
+            await queries.insert_road_bulk(added)
+
+    def _player_can_free_pick_pile(self, player: dict, pile: dict) -> bool:
+        """Timed pickup into barrow without going through buy flow."""
+        pid = player["id"]
+        if pile.get("sell_price") is not None:
+            return pile.get("owner_id") == pid
+        px, py = int(pile["x"]), int(pile["y"])
+        par_id = self.parcel_at.get((px, py))
+        par = self.world_parcels.get(par_id) if par_id else None
+        if par and par.get("owner_id") is not None and par["owner_id"] == pile.get("owner_id"):
+            return pid == pile.get("owner_id")
+        return True
 
     # ---------------------------------------------------------------- helpers
 
@@ -174,6 +421,7 @@ class GameEngine:
         token = str(uuid.uuid4())
         self.tokens[token] = player["id"]
         player.setdefault("pocket",          {})
+        player.setdefault("bucket",         {})
         player.setdefault("wb_paint",        100.0)
         player.setdefault("wb_tire",         100.0)
         player.setdefault("wb_handle",       100.0)
@@ -184,6 +432,7 @@ class GameEngine:
         player.setdefault("wb_handle_level", 1)
         player.setdefault("wb_barrow_level", 1)
         player["bucket_cap"] = WB_BUCKET_CAP.get(player["wb_bucket_level"], 10)
+        _migrate_pocket_fertilizer_to_bucket(player)
         self.players[player["id"]] = player
         return token
 
@@ -209,6 +458,8 @@ class GameEngine:
         elif t == "buy_parcel":     await self._buy_parcel(player_id, msg.get("parcel_id"))
         elif t == "build":          await self._build(player_id, msg.get("structure_type"))
         elif t == "unload":         await self._unload(player_id)
+        elif t == "deposit_build": await self._deposit_construction(player_id)
+        elif t == "silo_withdraw": await self._silo_withdraw(player_id)
         elif t == "set_pile_price": await self._set_pile_price(player_id, msg.get("resource_type"), msg.get("price"))
         elif t == "buy_pile":       await self._buy_pile(player_id, msg.get("resource_type"), msg.get("amount"))
         elif t == "npc_shop_buy":   await self._npc_shop_buy(player_id, msg.get("shop"), msg.get("item"))
@@ -255,7 +506,7 @@ class GameEngine:
 
     async def _sell_npc_market(self, player_id: int):
         player = self.players.get(player_id)
-        if not player or (player["x"], player["y"]) != MARKET_TILE:
+        if not player or not _at_any_npc_market(player, self.towns):
             return
         bucket = player.get("bucket", {})
         if not bucket:
@@ -315,7 +566,6 @@ class GameEngine:
             await self._send(player_id, {"type": "notice", "msg": "You can only build on your own land."})
             return
 
-        # Town bans check
         town = self._get_player_town(player)
         if town:
             bans = self.town_bans.get(town["id"], {})
@@ -331,49 +581,143 @@ class GameEngine:
                 return
 
         sdef = STRUCTURE_DEFS[structure_type]
-        if player["coins"] < sdef["cost_coins"]:
-            await self._send(player_id, {"type": "notice", "msg": f"Need {sdef['cost_coins']}c."})
+        consdef = sdef.get("construction")
+        if not consdef:
+            await self._send(player_id, {"type": "notice", "msg": "Invalid structure definition."})
             return
-        for rtype, amt in sdef["cost_resources"].items():
-            if player.get("bucket", {}).get(rtype, 0) < amt:
-                await self._send(player_id, {"type": "notice", "msg": f"Need {amt} {rtype} in bucket."})
-                return
 
-        # Special: town hall — only one per town zone
-        if sdef.get("is_town_hall"):
-            if town:
-                if town.get("hall_built"):
-                    await self._send(player_id, {"type": "notice",
-                        "msg": f"{town.get('custom_name') or town['name']} already has a Town Hall."})
-                    return
+        init_coins = int(consdef["init_coins"])
+        if player["coins"] < init_coins:
+            await self._send(player_id, {"type": "notice", "msg": f"Need {init_coins}c to start construction."})
+            return
 
-        player["coins"] -= sdef["cost_coins"]
-        for rtype, amt in sdef["cost_resources"].items():
-            player["bucket"][rtype] = round(player["bucket"].get(rtype, 0) - amt, 2)
-            if player["bucket"][rtype] <= 0:
-                del player["bucket"][rtype]
+        if sdef.get("is_town_hall") and town and town.get("hall_built"):
+            await self._send(player_id, {"type": "notice",
+                "msg": f"{town.get('custom_name') or town['name']} already has a Town Hall."})
+            return
 
-        struct_row = await queries.create_structure(parcel["id"], tx, ty, structure_type)
+        player["coins"] -= init_coins
+        cfg = {"construction": init_construction_state(sdef)}
+        struct_row = await queries.create_structure(
+            parcel["id"], tx, ty, structure_type, config=cfg,
+        )
         node = self._struct_to_node(struct_row)
         self.structures[node["id"]] = node
-
-        # Town hall: claim town
-        if sdef.get("is_town_hall") and town:
-            town["hall_built"]   = 1
-            town["founder_id"]   = player_id
-            town["leader_id"]    = player_id
-            import datetime
-            town["next_election_at"] = datetime.datetime.utcnow() + datetime.timedelta(days=ELECTION_CYCLE_DAYS)
-            await queries.update_town(town)
-            await self._send(player_id, {"type": "notice",
-                "msg": f"You founded {town.get('custom_name') or town['name']}! You can now set taxes and rename it."})
-            await self._broadcast_all({"type": "town_update", "town": self._town_wire(town)})
+        await queries.save_player(player)
 
         await self._send(player_id, {
             "type":      "built",
             "structure": self._node_wire(node),
             "coins":     player["coins"],
+            "msg":       f"Construction started — deposit stone/gravel for the foundation, then wood and other materials. [G] to deliver from your barrow.",
         })
+
+    async def _deposit_construction(self, player_id: int):
+        player = self.players.get(player_id)
+        if not player:
+            return
+        tx, ty = player["x"], player["y"]
+        node = next(
+            (n for n in self.structures.values() if n["x"] == tx and n["y"] == ty),
+            None,
+        )
+        if not node or not node.get("construction_active"):
+            await self._send(player_id, {"type": "notice", "msg": "No construction site here."})
+            return
+        if node.get("owner_id") != player_id:
+            await self._send(player_id, {"type": "notice", "msg": "Not your construction site."})
+            return
+        bucket = player.get("bucket", {})
+        if not bucket:
+            await self._send(player_id, {"type": "notice", "msg": "Barrow is empty."})
+            return
+        cons = node["config"].setdefault("construction", {})
+        total, tags = deposit_all_from_bucket(cons, bucket)
+        if total <= 0:
+            await self._send(player_id, {"type": "notice",
+                "msg": "Nothing in your barrow matches what's needed next (foundation first, then building)."})
+            return
+        await queries.save_structure(node)
+        await queries.save_player(player)
+        note = f"Delivered {round(total, 1)} units to the site."
+        if "foundation_complete" in tags:
+            note += " Foundation complete — keep supplying materials."
+        if construction_is_complete(cons):
+            await self._finalize_structure(node, player_id)
+        else:
+            await self._send(player_id, {
+                "type": "notice", "msg": note,
+                "structure": self._node_wire(node),
+            })
+
+    async def _finalize_structure(self, node: dict, player_id: int):
+        sdef = STRUCTURE_DEFS.get(node["structure_type"], {})
+        node["config"].pop("construction", None)
+        node["construction_active"] = False
+        node["replenish_rate"] = sdef.get("replenish_rate", 0)
+        node["max_amount"] = sdef.get("max_amount", 0)
+        node["collect_fee"] = sdef.get("collect_fee", 0)
+        node["node_type"] = sdef.get("produces") or node["structure_type"]
+        node["is_market"] = sdef.get("is_market", False)
+        node["is_town_hall"] = sdef.get("is_town_hall", False)
+        node["is_silo"] = bool(sdef.get("is_silo"))
+        player = self.players.get(player_id)
+        town = self._get_player_town(player) if player else None
+
+        done_msg = f"{sdef.get('label', 'Building')} complete!"
+        if sdef.get("is_town_hall") and town:
+            town["hall_built"] = 1
+            town["founder_id"] = player_id
+            town["leader_id"] = player_id
+            town["next_election_at"] = datetime.datetime.utcnow() + datetime.timedelta(days=ELECTION_CYCLE_DAYS)
+            await queries.update_town(town)
+            done_msg = (
+                f"You founded {town.get('custom_name') or town['name']}! "
+                "You can now set taxes and rename it."
+            )
+            await self._broadcast_all({"type": "town_update", "town": self._town_wire(town)})
+
+        await queries.save_structure(node)
+        await self._send(player_id, {
+            "type":      "built",
+            "structure": self._node_wire(node),
+            "coins":     player["coins"] if player else 0,
+            "msg":       done_msg,
+        })
+
+    async def _silo_withdraw(self, player_id: int):
+        player = self.players.get(player_id)
+        if not player:
+            return
+        tx, ty = player["x"], player["y"]
+        node = next(
+            (n for n in self.structures.values()
+             if n.get("is_silo") and n["x"] == tx and n["y"] == ty and not n.get("construction_active")),
+            None,
+        )
+        if not node or node.get("owner_id") != player_id:
+            await self._send(player_id, {"type": "notice", "msg": "Stand on your silo to withdraw grain."})
+            return
+        inv = node.setdefault("inventory", {})
+        w = float(inv.get("wheat", 0) or 0)
+        if w <= 0:
+            await self._send(player_id, {"type": "notice", "msg": "Silo is empty."})
+            return
+        cap = player["bucket_cap"]
+        load = _bucket_total(player.get("bucket", {}))
+        space = cap - load
+        if space <= 0:
+            await self._send(player_id, {"type": "notice", "msg": "No space in barrow."})
+            return
+        take = min(w, space)
+        take = round(take, 2)
+        inv["wheat"] = round(w - take, 2)
+        if inv["wheat"] <= 0:
+            del inv["wheat"]
+        player.setdefault("bucket", {})["wheat"] = round(player["bucket"].get("wheat", 0) + take, 2)
+        await queries.save_structure(node)
+        await queries.save_player(player)
+        await self._send(player_id, {"type": "notice", "msg": f"Withdrew {take} wheat from the silo."})
 
     # ---- unload to pile -----------------------------------------------------
 
@@ -381,28 +725,70 @@ class GameEngine:
         player = self.players.get(player_id)
         if not player:
             return
-        parcel = self._get_player_parcel(player)
-        if not parcel or parcel.get("owner_id") != player_id:
-            await self._send(player_id, {"type": "notice", "msg": "You can only pile resources on your own land."})
-            return
         bucket = player.get("bucket", {})
         if not bucket:
             await self._send(player_id, {"type": "notice", "msg": "Bucket is empty."})
             return
         tx, ty = player["x"], player["y"]
+        silo = next(
+            (
+                n
+                for n in self.structures.values()
+                if n.get("is_silo")
+                and int(n["x"]) == tx
+                and int(n["y"]) == ty
+                and not n.get("construction_active")
+                and n.get("owner_id") == player_id
+            ),
+            None,
+        )
+        silo_put = 0.0
+        if silo:
+            sdef = STRUCTURE_DEFS.get("silo", {})
+            cap = float(sdef.get("silo_capacity", 5000))
+            inv = silo.setdefault("inventory", {})
+            cur = float(inv.get("wheat", 0) or 0)
+            space = max(0.0, cap - cur)
+            w = float(bucket.get("wheat", 0) or 0)
+            if w > 0 and space > 0:
+                put = round(min(w, space), 2)
+                inv["wheat"] = round(cur + put, 2)
+                bucket["wheat"] = round(w - put, 2)
+                if bucket["wheat"] <= 0:
+                    del bucket["wheat"]
+                silo_put = put
+                await queries.save_structure(silo)
+        if not bucket:
+            await queries.save_player(player)
+            await self._send(player_id, {
+                "type": "notice",
+                "msg": f"Stored {round(silo_put, 1)} wheat in the silo.",
+            })
+            return
+
+        pid_at = self.parcel_at.get((tx, ty))
+        parcel = self.world_parcels.get(pid_at) if pid_at else None
+        parcel_id = parcel["id"] if parcel else None
         key = (tx, ty)
         self.piles.setdefault(key, {})
         total = 0.0
         for rtype, amt in list(bucket.items()):
             if amt <= 0:
                 continue
-            existing  = self.piles[key].get(rtype, {})
-            new_amt   = round(existing.get("amount", 0) + amt, 2)
-            pile_row  = await queries.upsert_pile(parcel["id"], player_id, tx, ty, rtype, new_amt, existing.get("sell_price"))
+            existing = self.piles[key].get(rtype, {})
+            new_amt = round(existing.get("amount", 0) + amt, 2)
+            pile_row = await queries.upsert_pile(
+                parcel_id, player_id, tx, ty, rtype, new_amt, existing.get("sell_price"),
+            )
             self.piles[key][rtype] = dict(pile_row)
             total += amt
         player["bucket"] = {}
-        await self._send(player_id, {"type": "notice", "msg": f"Piled {round(total,1)} units. Press [E] to set a price."})
+        await queries.save_player(player)
+        parts = []
+        if silo_put > 0:
+            parts.append(f"Stored {round(silo_put, 1)} wheat in the silo")
+        parts.append(f"piled {round(total, 1)} units here — [E] to set a sell price on your own land")
+        await self._send(player_id, {"type": "notice", "msg": " — ".join(parts)})
 
     # ---- set pile price -----------------------------------------------------
 
@@ -415,8 +801,18 @@ class GameEngine:
         if not pile or pile.get("owner_id") != player_id:
             await self._send(player_id, {"type": "notice", "msg": "No pile of that type here that you own."})
             return
+        pk = self.parcel_at.get(key)
+        par = self.world_parcels.get(pk) if pk else None
+        if not par or par.get("owner_id") != player_id:
+            await self._send(player_id, {
+                "type": "notice",
+                "msg": "Sell prices can only be set on piles that sit on your own land.",
+            })
+            return
         sp = None if price is None else max(0.0, float(price))
-        pile_row = await queries.upsert_pile(pile["parcel_id"], player_id, *key, resource_type, pile["amount"], sp)
+        pile_row = await queries.upsert_pile(
+            pile.get("parcel_id"), player_id, *key, resource_type, pile["amount"], sp,
+        )
         self.piles[key][resource_type] = dict(pile_row)
         await self._send(player_id, {"type": "notice",
             "msg": f"{resource_type}: {'not for sale' if sp is None else f'{sp}c/unit'}"})
@@ -435,13 +831,10 @@ class GameEngine:
         if pile.get("owner_id") == player_id:
             await self._send(player_id, {"type": "notice", "msg": "That's your own pile."})
             return
-        bucket = player.setdefault("bucket", {})
-        space  = player["bucket_cap"] - _bucket_total(bucket)
-        can    = min(float(amount), space, pile["amount"],
-                     player["coins"] / pile["sell_price"])
+        can = min(float(amount), pile["amount"], player["coins"] / pile["sell_price"])
         if can <= 0:
             await self._send(player_id, {"type": "notice",
-                "msg": "No space, no funds, or pile empty."})
+                "msg": "No funds, or pile empty."})
             return
         can  = round(can, 2)
         cost = round(can * pile["sell_price"])
@@ -452,9 +845,8 @@ class GameEngine:
             await self._send(player_id, {"type": "notice", "msg": f"Need {cost}c."})
             return
 
-        player["coins"]   -= cost
-        bucket[resource_type] = round(bucket.get(resource_type, 0) + can, 2)
-        pile["amount"]    = round(pile["amount"] - can, 2)
+        player["coins"] -= cost
+        pile["amount"] = round(pile["amount"] - can, 2)
         owner = self.players.get(pile["owner_id"])
         if owner:
             owner["coins"] += cost_after_tax
@@ -463,19 +855,24 @@ class GameEngine:
             del self.piles[key][resource_type]
             await queries.delete_pile(*key, resource_type)
         else:
-            await queries.upsert_pile(pile["parcel_id"], pile["owner_id"], *key,
-                                      resource_type, pile["amount"], pile["sell_price"])
+            await queries.upsert_pile(
+                pile.get("parcel_id"), pile["owner_id"], *key,
+                resource_type, pile["amount"], pile["sell_price"],
+            )
+        player.setdefault("_pending_pile_loads", []).append({
+            "x": key[0], "y": key[1], "rtype": resource_type, "remaining": float(can),
+        })
         tax_str = f" (+{tax}c town tax)" if tax else ""
         await self._send(player_id, {"type": "notice",
-            "msg": f"Bought {can} {resource_type} for {cost}c{tax_str}."})
+            "msg": f"Paid {cost}c for {can} {resource_type}. Stand on the pile to load into your barrow.{tax_str}"})
 
     # ---- NPC shops ----------------------------------------------------------
 
     async def _npc_shop_buy(self, player_id: int, shop: str, item: str):
         player = self.players.get(player_id)
-        if not player or shop not in NPC_SHOP_LOCATIONS:
+        if not player or shop not in ("seed_shop", "general_store", "repair_shop"):
             return
-        if not _near_shop(player, shop):
+        if not _near_shop(player, shop, self.towns):
             await self._send(player_id, {"type": "notice", "msg": "Move closer to the shop."})
             return
         if shop == "seed_shop":
@@ -493,9 +890,20 @@ class GameEngine:
         if player["coins"] < catalog["cost"]:
             await self._send(player_id, {"type": "notice", "msg": f"Need {catalog['cost']}c."})
             return
-        player["coins"] -= catalog["cost"]
-        pocket = player.setdefault("pocket", {})
-        pocket[item] = pocket.get(item, 0) + catalog["qty"]
+        qty = catalog["qty"]
+        if item == "fertilizer":
+            space = player["bucket_cap"] - _bucket_total(player.get("bucket", {}))
+            if space < qty:
+                await self._send(player_id, {"type": "notice",
+                    "msg": f"Need {qty} free barrow space for fertilizer (have {space})."})
+                return
+            player["coins"] -= catalog["cost"]
+            b = player.setdefault("bucket", {})
+            b["fertilizer"] = round(b.get("fertilizer", 0) + qty, 2)
+        else:
+            player["coins"] -= catalog["cost"]
+            pocket = player.setdefault("pocket", {})
+            pocket[item] = pocket.get(item, 0) + qty
         await self._send(player_id, {"type": "notice",
             "msg": f"Bought {catalog['label']} for {catalog['cost']}c."})
 
@@ -536,7 +944,7 @@ class GameEngine:
         player = self.players.get(player_id)
         if not player:
             return
-        if not _near_shop(player, "repair_shop"):
+        if not _near_shop(player, "repair_shop", self.towns):
             await self._send(player_id, {"type": "notice", "msg": "Move closer to the Repair Shop."})
             return
         if component == "flat":
@@ -573,7 +981,7 @@ class GameEngine:
         player = self.players.get(player_id)
         if not player:
             return
-        if not _near_shop(player, "general_store"):
+        if not _near_shop(player, "general_store", self.towns):
             await self._send(player_id, {"type": "notice", "msg": "Move closer to the General Store."})
             return
         current = player.get(f"wb_{component}_level", 1)
@@ -585,12 +993,28 @@ class GameEngine:
         player = self.players.get(player_id)
         if not player:
             return
-        tx, ty   = player["x"], player["y"]
-        parcel   = self._get_player_parcel(player)
-        crop     = self.crops.get((tx, ty))
-        now_utc  = datetime.datetime.utcnow()
+        tx, ty  = player["x"], player["y"]
+        parcel  = self._get_player_parcel(player)
+        crop    = self.crops.get((tx, ty))
+        now_utc = datetime.datetime.utcnow()
 
-        if crop and not crop.get("harvested"):
+        # Frost-killed crop — till to clear stubble and prepare soil
+        if crop and crop.get("winter_dead"):
+            if not parcel or parcel.get("owner_id") != player_id:
+                await self._send(player_id, {"type": "notice", "msg": "Not your land."})
+                return
+            await queries.harvest_crop(crop["id"])
+            del self.crops[(tx, ty)]
+            await queries.upsert_soil_tile(tx, ty, 1)
+            self.soil[(tx, ty)] = 1
+            await self._send(player_id, {
+                "type": "notice",
+                "msg": "Tilled — frosted stubble cleared. Soil is ready for seeds.",
+            })
+            return
+
+        # Growing crop (alive)
+        if crop and not crop.get("winter_dead"):
             ready_at = crop["ready_at"]
             if isinstance(ready_at, str):
                 ready_at = datetime.datetime.fromisoformat(ready_at)
@@ -607,56 +1031,83 @@ class GameEngine:
                     return
                 player.setdefault("bucket", {})[crop["crop_type"]] = round(
                     player["bucket"].get(crop["crop_type"], 0) + take, 2)
-                crop["harvested"] = 1
                 del self.crops[(tx, ty)]
                 await queries.harvest_crop(crop["id"])
-                await self._send(player_id, {"type": "notice", "msg": f"Harvested {round(take,1)} {crop['crop_type']}!"})
+                await queries.upsert_soil_tile(tx, ty, 0)
+                self.soil[(tx, ty)] = 0
+                await self._send(player_id, {"type": "notice", "msg": f"Harvested {round(take,1)} {crop['crop_type']}! Till before planting again."})
                 return
-            # Try fertilize
-            pocket = player.get("pocket", {})
-            if not crop.get("fertilized_at") and pocket.get("fertilizer", 0) > 0:
+            pocket = player.setdefault("pocket", {})
+            bucket = player.setdefault("bucket", {})
+            fert_b = float(bucket.get("fertilizer", 0) or 0)
+            fert_p = float(pocket.get("fertilizer", 0) or 0)
+            man_b  = float(bucket.get("manure", 0) or 0)
+            if not crop.get("fertilized_at") and (fert_b >= 1 or fert_p > 0 or man_b >= 1):
                 planted_at = crop["planted_at"]
                 if isinstance(planted_at, str):
                     planted_at = datetime.datetime.fromisoformat(planted_at)
                 elapsed = (now_utc - planted_at).total_seconds()
                 cdef = CROP_DEFS.get(crop["crop_type"], CROP_DEFS["wheat"])
                 if elapsed <= cdef["fertilize_window_s"]:
-                    pocket["fertilizer"] -= 1
-                    if pocket["fertilizer"] <= 0:
-                        del pocket["fertilizer"]
+                    if fert_b >= 1:
+                        bucket["fertilizer"] = round(fert_b - 1, 2)
+                        if bucket["fertilizer"] <= 0:
+                            del bucket["fertilizer"]
+                        src = "fertilizer"
+                    elif fert_p > 0:
+                        pocket["fertilizer"] = fert_p - 1
+                        if pocket["fertilizer"] <= 0:
+                            del pocket["fertilizer"]
+                        src = "fertilizer"
+                    else:
+                        bucket["manure"] = round(man_b - 1, 2)
+                        if bucket["manure"] <= 0:
+                            del bucket["manure"]
+                        src = "manure"
                     new_ready = now_utc + datetime.timedelta(seconds=cdef["grow_time_fert_s"] - elapsed)
                     crop["fertilized_at"] = now_utc.isoformat()
                     crop["ready_at"]      = new_ready
                     await queries.fertilize_crop(crop["id"], new_ready)
-                    await self._send(player_id, {"type": "notice", "msg": "Fertilized! Crop grows faster."})
+                    note = "Fertilized! Crop grows faster." if src == "fertilizer" else "Applied manure — crop grows faster."
+                    await self._send(player_id, {"type": "notice", "msg": note})
                     return
             mins = max(0, int((ready_at - now_utc).total_seconds() // 60))
             await self._send(player_id, {"type": "notice",
                 "msg": f"Crop growing. ~{mins} min left."})
             return
 
-        # Plant
+        # No crop — own land only for till / plant
         if not parcel or parcel.get("owner_id") != player_id:
             await self._send(player_id, {"type": "notice", "msg": "You can only farm on your own land."})
             return
-        pocket = player.setdefault("pocket", {})
-        if pocket.get("wheat_seed", 0) <= 0:
-            await self._send(player_id, {"type": "notice",
-                "msg": "No wheat seeds. Buy from Seed Shop."})
-            return
-        for n in {**self.nodes, **self.structures}.values():
-            if n["x"] == tx and n["y"] == ty:
-                await self._send(player_id, {"type": "notice", "msg": "Something else is here."})
+
+        if self._soil_ready_for_planting(tx, ty):
+            pocket = player.setdefault("pocket", {})
+            if pocket.get("wheat_seed", 0) <= 0:
+                await self._send(player_id, {"type": "notice",
+                    "msg": "Soil is tilled. You need wheat seeds (Seed Shop) to plant."})
                 return
-        pocket["wheat_seed"] -= 1
-        if pocket["wheat_seed"] <= 0:
-            del pocket["wheat_seed"]
-        cdef     = CROP_DEFS["wheat"]
-        ready_at = now_utc + datetime.timedelta(seconds=cdef["grow_time_s"])
-        row      = await queries.create_crop(parcel["id"], player_id, tx, ty, "wheat", ready_at)
-        row["ready_at"] = ready_at
-        self.crops[(tx, ty)] = dict(row)
-        await self._send(player_id, {"type": "notice", "msg": "Planted wheat! Ready in ~20 min."})
+            for n in {**self.nodes, **self.structures}.values():
+                if n["x"] == tx and n["y"] == ty:
+                    await self._send(player_id, {"type": "notice", "msg": "Something else is here."})
+                    return
+            pocket["wheat_seed"] -= 1
+            if pocket["wheat_seed"] <= 0:
+                del pocket["wheat_seed"]
+            cdef     = CROP_DEFS["wheat"]
+            ready_at = now_utc + datetime.timedelta(seconds=cdef["grow_time_s"])
+            row      = await queries.create_crop(parcel["id"], player_id, tx, ty, "wheat", ready_at)
+            row["ready_at"] = ready_at
+            row["winter_dead"] = 0
+            self.crops[(tx, ty)] = dict(row)
+            await queries.upsert_soil_tile(tx, ty, 0)
+            self.soil[(tx, ty)] = 0
+            await self._send(player_id, {"type": "notice", "msg": "Planted wheat! Ready in ~20 min."})
+            return
+
+        await queries.upsert_soil_tile(tx, ty, 1)
+        self.soil[(tx, ty)] = 1
+        await self._send(player_id, {"type": "notice", "msg": "Tilled the soil. Plant wheat seeds when ready."})
 
     # ---- player market ------------------------------------------------------
 
@@ -865,8 +1316,15 @@ class GameEngine:
     async def tick(self, resource_tick_s: int, persist_interval_s: int):
         now = time.monotonic()
 
+        prev_season = self.season.season
         if self.season.tick():
-            await queries.save_season_state(self.season.season)
+            new_season = self.season.season
+            await queries.save_season_state(new_season)
+            if new_season == 3:
+                await self._kill_unharvested_crops_for_winter()
+                await self._winter_rot_piles()
+            if prev_season == 3 and new_season == 0:
+                await self._grow_roads_new_year()
             await self._broadcast_all({"type": "season_change", "season": self.season.wire()})
 
         if now - self._last_resource_tick >= resource_tick_s:
@@ -892,12 +1350,16 @@ class GameEngine:
                     await queries.save_player(p)
             for n in self.nodes.values():
                 await queries.save_node(n)
+            for s in self.structures.values():
+                await queries.save_structure(s)
             for t in self.towns.values():
                 await queries.update_town(t)
 
     async def _do_resource_tick(self, elapsed: float):
         all_nodes = {**self.nodes, **self.structures}
         for node in all_nodes.values():
+            if node.get("construction_active"):
+                continue
             if node.get("is_market") or node.get("is_town_hall"):
                 continue
             node["current_amount"] = min(
@@ -908,7 +1370,75 @@ class GameEngine:
             if player["id"] not in self.sockets:
                 continue
             px, py = player["x"], player["y"]
+            cap   = player["bucket_cap"]
+            load  = _bucket_total(player.get("bucket", {}))
+            space = cap - load
+
+            # Paid pile purchases: load into barrow over time while standing on the tile
+            pending = player.get("_pending_pile_loads") or []
+            new_pending: list[dict] = []
+            for pl in pending:
+                rem = float(pl.get("remaining", 0))
+                if rem <= 0:
+                    continue
+                if player["x"] != pl["x"] or player["y"] != pl["y"]:
+                    new_pending.append(pl)
+                    continue
+                load = _bucket_total(player.get("bucket", {}))
+                space = cap - load
+                if space <= 0:
+                    new_pending.append(pl)
+                    continue
+                rtype = pl["rtype"]
+                rate = COLLECTION_RATES.get(rtype, COLLECTION_RATE) * PILE_COLLECTION_MULT
+                take = min(rate, space, rem)
+                take = round(take, 2)
+                if take <= 0:
+                    new_pending.append(pl)
+                    continue
+                player.setdefault("bucket", {})[rtype] = round(
+                    player["bucket"].get(rtype, 0) + take, 2)
+                rem = round(rem - take, 2)
+                if rem > 0:
+                    pl["remaining"] = rem
+                    new_pending.append(pl)
+            player["_pending_pile_loads"] = new_pending
+
+            load = _bucket_total(player.get("bucket", {}))
+            space = cap - load
+            pile_map = self.piles.get((px, py))
+            if pile_map and space > 0:
+                for rtype, pile in list(pile_map.items()):
+                    if not self._player_can_free_pick_pile(player, pile):
+                        continue
+                    if pile["amount"] <= 0:
+                        continue
+                    rate = COLLECTION_RATES.get(rtype, COLLECTION_RATE) * PILE_COLLECTION_MULT
+                    load = _bucket_total(player.get("bucket", {}))
+                    space = cap - load
+                    if space <= 0:
+                        break
+                    take = min(rate, space, pile["amount"])
+                    take = round(take, 2)
+                    if take <= 0:
+                        continue
+                    pile["amount"] = round(pile["amount"] - take, 2)
+                    player.setdefault("bucket", {})[rtype] = round(
+                        player["bucket"].get(rtype, 0) + take, 2)
+                    if pile["amount"] <= 0:
+                        del self.piles[(px, py)][rtype]
+                        await queries.delete_pile(px, py, rtype)
+                    else:
+                        await queries.upsert_pile(
+                            pile.get("parcel_id"), pile["owner_id"], px, py, rtype,
+                            pile["amount"], pile.get("sell_price"),
+                        )
+
+            load = _bucket_total(player.get("bucket", {}))
+            space = cap - load
             for node in all_nodes.values():
+                if node.get("construction_active"):
+                    continue
                 if node.get("is_market") or node.get("is_town_hall"):
                     continue
                 if abs(px - node["x"]) > COLLECTION_RADIUS:
@@ -920,9 +1450,10 @@ class GameEngine:
                 space = cap - load
                 if space <= 0 or node["current_amount"] <= 0:
                     continue
-                collected = min(COLLECTION_RATE, space, node["current_amount"])
-                node["current_amount"] = max(0.0, node["current_amount"] - collected)
                 rtype = node["node_type"]
+                rate  = COLLECTION_RATES.get(rtype, COLLECTION_RATE)
+                collected = min(rate, space, node["current_amount"])
+                node["current_amount"] = max(0.0, node["current_amount"] - collected)
                 player.setdefault("bucket", {})[rtype] = round(
                     player["bucket"].get(rtype, 0) + collected, 2)
                 if node.get("is_structure"):
@@ -996,6 +1527,12 @@ class GameEngine:
                 self._crop_wire(c) for c in self.crops.values()
                 if abs(c["x"] - px) <= VIEWPORT_RADIUS and abs(c["y"] - py) <= VIEWPORT_RADIUS
             ]
+            nearby_roads = [
+                {"x": rx, "y": ry}
+                for (rx, ry) in self.road_tiles
+                if abs(rx - px) <= VIEWPORT_RADIUS and abs(ry - py) <= VIEWPORT_RADIUS
+            ]
+            nearby_soil = self._nearby_soil_tiles(px, py)
             try:
                 await ws.send_json({
                     "type":       "tick",
@@ -1004,6 +1541,8 @@ class GameEngine:
                     "nodes":      nearby_nodes + all_structs,
                     "piles":      nearby_piles,
                     "crops":      nearby_crops,
+                    "roads":      nearby_roads,
+                    "soil_tiles": nearby_soil,
                     "prices":     self.prices,
                     "season":     self.season.wire(),
                 })
@@ -1044,7 +1583,8 @@ class GameEngine:
         }
 
     def _node_wire(self, n: dict) -> dict:
-        return {
+        st = n.get("structure_type")
+        out = {
             "id": n["id"], "x": n["x"], "y": n["y"],
             "type":         n["node_type"],
             "amount":       round(n["current_amount"], 1),
@@ -1052,9 +1592,28 @@ class GameEngine:
             "is_structure": n.get("is_structure", False),
             "is_market":    n.get("is_market", False),
             "is_town_hall": n.get("is_town_hall", False),
+            "is_silo":      bool(n.get("is_silo")),
             "owner_name":   n.get("owner_name"),
             "owner_id":     n.get("owner_id"),
         }
+        if st:
+            out["structure_type"] = st
+        out["construction_active"] = bool(n.get("construction_active"))
+        if n.get("construction_active"):
+            cons = (n.get("config") or {}).get("construction") or {}
+            fr = foundation_remaining(cons)
+            br = building_remaining(cons)
+            out["construction"] = {
+                "foundation_remaining": {k: round(v, 1) for k, v in fr.items() if v > 0},
+                "building_remaining": {k: round(v, 1) for k, v in br.items() if v > 0},
+                "foundation_done": bool(cons.get("foundation_done")),
+            }
+        if n.get("is_silo"):
+            inv = n.get("inventory") or {}
+            cap = float(STRUCTURE_DEFS.get(st or "", {}).get("silo_capacity", 0) or 0)
+            out["silo_wheat"] = round(float(inv.get("wheat", 0) or 0), 1)
+            out["silo_capacity"] = cap
+        return out
 
     def _parcel_wire(self, p: dict) -> dict:
         return {
@@ -1094,13 +1653,46 @@ class GameEngine:
         ready_at = c["ready_at"]
         if isinstance(ready_at, str):
             ready_at = datetime.datetime.fromisoformat(ready_at)
+        wd = bool(c.get("winter_dead"))
         return {
             "x": c["x"], "y": c["y"],
-            "crop_type":  c["crop_type"],
-            "owner_id":   c["owner_id"],
-            "ready":      ready_at <= now,
-            "fertilized": c.get("fertilized_at") is not None,
+            "crop_type":   c["crop_type"],
+            "owner_id":    c["owner_id"],
+            "ready":       (not wd) and (ready_at <= now),
+            "fertilized":  (not wd) and (c.get("fertilized_at") is not None),
+            "winter_dead": wd,
         }
+
+    def _all_npc_markets_wire(self) -> list[dict]:
+        out: list[dict] = []
+        for t in self.towns.values():
+            d = t.get("npc_district") or {}
+            m = d.get("market")
+            if m and len(m) >= 2:
+                out.append({"x": int(m[0]), "y": int(m[1])})
+        if not out:
+            out.append({"x": MARKET_TILE[0], "y": MARKET_TILE[1]})
+        return out
+
+    def _all_npc_shops_wire(self) -> list[dict]:
+        out: list[dict] = []
+        for t in self.towns.values():
+            d = t.get("npc_district") or {}
+            for k in ("seed_shop", "general_store", "repair_shop"):
+                pos = d.get(k)
+                if pos and len(pos) >= 2:
+                    out.append({"key": k, "x": int(pos[0]), "y": int(pos[1]), "label": NPC_SHOP_LABELS[k]})
+        if not out:
+            for k, v in NPC_SHOP_LOCATIONS.items():
+                out.append({"key": k, "x": v[0], "y": v[1], "label": NPC_SHOP_LABELS[k]})
+        return out
+
+    def _nearby_soil_tiles(self, px: int, py: int) -> list[dict]:
+        out: list[dict] = []
+        for (sx, sy), tv in self.soil.items():
+            if abs(sx - px) <= VIEWPORT_RADIUS and abs(sy - py) <= VIEWPORT_RADIUS:
+                out.append({"x": sx, "y": sy, "tilled": int(tv)})
+        return out
 
     def full_state(self, player_id: int) -> dict:
         player = self.players[player_id]
@@ -1115,19 +1707,24 @@ class GameEngine:
             for rtype, pile in pile_map.items()
             if abs(tile_key[0]-px) <= VIEWPORT_RADIUS and abs(tile_key[1]-py) <= VIEWPORT_RADIUS
         ]
+        nearby_roads = [
+            {"x": rx, "y": ry}
+            for (rx, ry) in self.road_tiles
+            if abs(rx - px) <= VIEWPORT_RADIUS and abs(ry - py) <= VIEWPORT_RADIUS
+        ]
+        nearby_soil = self._nearby_soil_tiles(px, py)
         return {
             "type":    "init",
             "player":  self._player_wire(player),
             "nodes":   nearby_nodes + [self._node_wire(n) for n in self.structures.values()],
             "parcels": [self._parcel_wire(p) for p in self.world_parcels.values()],
             "piles":   nearby_piles,
-            "crops":   [self._crop_wire(c) for c in self.crops.values()],
-            "market":  {"x": MARKET_TILE[0], "y": MARKET_TILE[1]},
-            "npc_shops": [
-                {"key": k, "x": v[0], "y": v[1], "label": NPC_SHOP_LABELS[k]}
-                for k, v in NPC_SHOP_LOCATIONS.items()
-            ],
-            "towns":   [self._town_wire(t) for t in self.towns.values()],
+            "roads":   nearby_roads,
+            "soil_tiles": nearby_soil,
+            "crops":       [self._crop_wire(c) for c in self.crops.values()],
+            "npc_markets": self._all_npc_markets_wire(),
+            "npc_shops":   self._all_npc_shops_wire(),
+            "towns":       [self._town_wire(t) for t in self.towns.values()],
             "prices":  self.prices,
             "season":  self.season.wire(),
             "world":   {"w": WORLD_W, "h": WORLD_H},

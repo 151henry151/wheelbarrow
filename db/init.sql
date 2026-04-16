@@ -45,6 +45,8 @@ CREATE TABLE IF NOT EXISTS towns (
     center_y        INT NOT NULL,
     -- Polygon boundary: JSON array of {x,y} points defining the irregular border
     boundary        JSON NOT NULL,
+    -- Clustered NPC market + shops (one set per town), JSON object with market/seed_shop/general_store/repair_shop → [x,y]
+    npc_district    JSON DEFAULT NULL,
     founder_id      INT DEFAULT NULL,
     leader_id       INT DEFAULT NULL,
     tax_rate        FLOAT DEFAULT 0,             -- 0.0–0.30
@@ -88,7 +90,7 @@ CREATE TABLE IF NOT EXISTS structures (
 
 CREATE TABLE IF NOT EXISTS resource_piles (
     id            INT AUTO_INCREMENT PRIMARY KEY,
-    parcel_id     INT NOT NULL,
+    parcel_id     INT DEFAULT NULL,
     owner_id      INT NOT NULL,
     x             INT NOT NULL,
     y             INT NOT NULL,
@@ -96,8 +98,14 @@ CREATE TABLE IF NOT EXISTS resource_piles (
     amount        FLOAT NOT NULL DEFAULT 0,
     sell_price    FLOAT DEFAULT NULL,
     UNIQUE KEY idx_pile (x, y, resource_type),
-    FOREIGN KEY (parcel_id) REFERENCES world_parcels(id),
     FOREIGN KEY (owner_id)  REFERENCES players(id)
+);
+
+-- Dirt road tiles (NPC districts + growth toward player structures)
+CREATE TABLE IF NOT EXISTS world_roads (
+    x INT NOT NULL,
+    y INT NOT NULL,
+    PRIMARY KEY (x, y)
 );
 
 CREATE TABLE IF NOT EXISTS crops (
@@ -111,9 +119,18 @@ CREATE TABLE IF NOT EXISTS crops (
     fertilized_at DATETIME DEFAULT NULL,
     ready_at      DATETIME NOT NULL,
     harvested     TINYINT DEFAULT 0,
+    winter_dead   TINYINT NOT NULL DEFAULT 0,
     UNIQUE KEY idx_crop_xy (x, y),
     FOREIGN KEY (parcel_id) REFERENCES world_parcels(id),
     FOREIGN KEY (owner_id)  REFERENCES players(id)
+);
+
+-- Farm tile: tilled=1 means soil is ready for seeds; 0 or missing = must till first
+CREATE TABLE IF NOT EXISTS soil_tiles (
+    x       INT NOT NULL,
+    y       INT NOT NULL,
+    tilled  TINYINT NOT NULL DEFAULT 0,
+    PRIMARY KEY (x, y)
 );
 
 CREATE TABLE IF NOT EXISTS season_state (
@@ -164,7 +181,7 @@ INSERT INTO season_state (id, season, season_start) VALUES (1, 0, NOW())
 
 -- NPC market prices
 INSERT INTO market_prices (resource_type, price_per_unit) VALUES
-('manure',  2.0), ('gravel',  3.0), ('topsoil', 3.0), ('compost', 4.0),
+('manure',  5.0), ('gravel',  3.0), ('topsoil', 3.0), ('compost', 4.0),
 ('wood',    3.0), ('stone',   4.0), ('clay',    2.5), ('dirt',    1.0),
-('wheat',   5.0)
+('wheat',   5.0), ('fertilizer', 12.0)
 ON DUPLICATE KEY UPDATE price_per_unit = VALUES(price_per_unit);

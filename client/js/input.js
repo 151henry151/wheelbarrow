@@ -11,6 +11,8 @@ const Input = (() => {
     sendFn = fn;
     onKey  = keyFn;
     window.addEventListener('keydown', e => {
+      // Never intercept browser shortcuts (Ctrl/Alt/Meta combos like Ctrl+R, Ctrl+Shift+R)
+      if (e.ctrlKey || e.altKey || e.metaKey) return;
       if (dirKeys[e.key]) { e.preventDefault(); held[e.key] = true; return; }
       e.preventDefault();
       onKey && onKey(e.key);

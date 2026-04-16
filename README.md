@@ -27,7 +27,9 @@ Inspired by the spirit of [A Tractor](https://store.steampowered.com/app/779050/
 | Space | Sell at NPC market |
 | B | Preview parcel under your feet; press B again to confirm purchase |
 | P | Open build menu (on own land) |
-| U | Unload bucket to resource pile (on own land) |
+| U | Unload bucket — resource pile on own land; **wheat** goes into a **completed silo** if you stand on your silo |
+| G | Deliver barrow materials to a **construction site** under your feet (your own site) |
+| O | Withdraw **wheat** from your **silo** into the barrow |
 | E | Context interact — town hall / NPC shop / manage pile prices / trade at player market |
 | F | Farm action — plant wheat / fertilize / harvest |
 | H | Toggle HUD (hidden by default — just press H to see it) |
@@ -39,11 +41,12 @@ Inspired by the spirit of [A Tractor](https://store.steampowered.com/app/779050/
 2. **Sell** at the NPC primary market (about 60 tiles south of spawn); prices drift based on supply
 3. **Buy land** — parcels are variable size and price; press B once to preview the outline and price, B again to buy
 4. **Pile resources** on your land (`U`), set a sell price (`E`), and let other players buy from you — no market building required
-5. **Build structures** — horse stable, gravel pit, compost heap; other players pay you a fee when they collect
-6. **Build a Player Market** (2000c + 50 wood + 30 stone) — set custom buy and sell prices for any goods; the most powerful economic tool in the game
-7. **Farm wheat** — buy seeds from the Seed Shop, plant on owned land, optionally fertilize for double yield, harvest in ~10–20 min
-8. **Build a Town Hall** (5000c + materials) to become a town's founder — name it, set a sales tax (0–30%), and govern which structures and goods are allowed
-9. **Upgrade your wheelbarrow** at the General Store — larger bucket (6 tiers), tire type (regular → tubeless → heavy-duty), handle material (wood → steel → fiberglass), and barrow material (plastic → steel → aluminium); material choices affect both speed and maintenance
+5. **Build structures** — pay the **starting coin** cost to place a **construction site**, then carry **foundation** and **building** materials to the tile and press **`G`** to deliver each load until the building completes (horse stable, gravel pit, compost heap, topsoil mound, **player market**, **town hall**, **grain silo**)
+6. **Build a Player Market** — **2000c** to start the site, then staged stone/wood delivery — set custom buy and sell prices for any goods; the most powerful economic tool in the game
+7. **Farm wheat** — buy seeds from the Seed Shop, plant on owned land, optionally fertilize for double yield, harvest in ~10–20 min; **uncovered wheat piles rot into compost in winter** — store grain in a **silo** to protect it
+8. **Build a Grain Silo** — **500c** to start, **60 stone** + **80 wood** delivered in trips; unload wheat with **`U`** on the silo, retrieve with **`O`**
+9. **Build a Town Hall** — **5000c** to start the site, then staged foundation and building materials — become a town's founder: name it, set a sales tax (0–30%), and govern which structures and goods are allowed
+10. **Upgrade your wheelbarrow** at the General Store — larger bucket (6 tiers), tire type (regular → tubeless → heavy-duty), handle material (wood → steel → fiberglass), and barrow material (plastic → steel → aluminium); material choices affect both speed and maintenance
 
 ### Wheelbarrow condition
 Your wheelbarrow degrades as you move:
@@ -78,7 +81,7 @@ All NPC shops are ~56 tiles from spawn — not visible at the starting field. Ex
 | Repair Shop | (500, 444) | Condition repairs, flat tyre fix |
 
 ### Seasons
-The year cycles through **Spring → Summer → Fall → Winter** (15 minutes each). Farming is tuned around the season cycle; the current season and time remaining are shown in the HUD.
+The year cycles through **Spring → Summer → Fall → Winter** (15 minutes each). Farming is tuned around the season cycle; the current season and time remaining are shown in the HUD. **Winter** kills crops still in the field; **wheat** left in **piles** on the ground rots into **compost** — **silos** keep stored wheat safe.
 
 ### Resource types
 | Resource | Where | NPC price | Notes |
@@ -119,6 +122,7 @@ wheelbarrow/
 │   │   ├── engine.py     # In-memory game state, all game actions
 │   │   ├── tick.py       # Server-side game loop (asyncio)
 │   │   ├── constants.py  # Game constants and definitions
+│   │   ├── construction.py # Staged building (foundation + materials)
 │   │   ├── seasons.py    # Season clock
 │   │   ├── wb_condition.py # Wheelbarrow condition/decay
 │   │   └── world_gen.py  # Procedural world generation (runs once at startup)
@@ -166,12 +170,12 @@ Open `http://localhost:8000` in a browser.
 
 ## Deployment
 
-The game runs on `wheelbarrow.hromp.com` via a systemd service behind nginx.
+The public game is served at **https://hromp.com/wheelbarrow/** (path on the main `hromp.com` vhost) via a systemd service behind nginx.
 
-See `wheelbarrow.service` for the service unit template. Deployment is handled manually via SSH to `henry@romptele.com`.
+See `wheelbarrow.service` for the service unit template. Deployment is handled manually via SSH to `henry@romptele.com`. Additional notes live in `deploy/README.md`.
 
 ---
 
 ## Version
 
-Current version: **0.6.0**. See [CHANGELOG.md](CHANGELOG.md).
+Current version: **0.7.0** (also in `VERSION` and `pyproject.toml`). See [CHANGELOG.md](CHANGELOG.md).

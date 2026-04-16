@@ -16,8 +16,9 @@ from server.game.constants import (
     PARCEL_W_RANGE, PARCEL_H_RANGE,
     PARCEL_PRICE_PER_TILE, PARCEL_RESOURCE_BONUS, PARCEL_MIN_PRICE,
     TOWN_PARCELS_PER_TOWN, WILDERNESS_PARCELS,
-    PLAYER_SPAWN, MARKET_TILE, NPC_SHOP_LOCATIONS,
+    PLAYER_SPAWN,
 )
+from server.game.town_npcs import place_npc_district
 from server.db import queries
 
 # ---- Biome helpers ----------------------------------------------------------
@@ -237,12 +238,20 @@ def _generate_parcels(rng: random.Random, towns: list[dict],
     # occupied[tx][ty] = True if tile is inside an existing parcel
     occupied: set[tuple] = set()
 
-    # Protected tiles: don't place parcels over NPC shops / market / spawn
+    # Protected tiles: don't place parcels over NPC districts / spawn
     protected: set[tuple] = set()
-    for (px, py) in [MARKET_TILE, PLAYER_SPAWN] + list(NPC_SHOP_LOCATIONS.values()):
-        for dx in range(-3, 4):
-            for dy in range(-3, 4):
-                protected.add((px + dx, py + dy))
+    for dx0 in range(-3, 4):
+        for dy0 in range(-3, 4):
+            protected.add((PLAYER_SPAWN[0] + dx0, PLAYER_SPAWN[1] + dy0))
+    for town in towns:
+        district = town.get("npc_district") or {}
+        for pos in district.values():
+            if not pos or len(pos) < 2:
+                continue
+            px, py = int(pos[0]), int(pos[1])
+            for dx in range(-3, 4):
+                for dy in range(-3, 4):
+                    protected.add((px + dx, py + dy))
 
     def _count_resources(x, y, w, h):
         return sum(
@@ -317,6 +326,8 @@ async def generate_world_if_needed():
     print("[world_gen] Generating world...")
 
     towns    = _place_towns(rng)
+    for t in towns:
+        t["npc_district"] = place_npc_district(t, rng)
     nodes    = _generate_nodes(rng)
     parcels  = _generate_parcels(rng, towns, nodes)
 

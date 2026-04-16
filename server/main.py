@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
@@ -65,7 +66,17 @@ async def websocket_endpoint(websocket: WebSocket, token: str):
         await websocket.send_json(engine.full_state(player["id"]))
         while True:
             msg = await websocket.receive_json()
-            await engine.handle_input(player["id"], msg)
+            try:
+                await engine.handle_input(player["id"], msg)
+            except Exception:
+                logging.exception("handle_input failed")
+                try:
+                    await websocket.send_json({
+                        "type": "notice",
+                        "msg": "Server hit an error on that action — try again or refresh the page.",
+                    })
+                except Exception:
+                    pass
     except WebSocketDisconnect:
         pass
     finally:

@@ -7,11 +7,33 @@ PLAYER_SPAWN = (500, 500)
 MARKET_TILE = (500, 560)
 
 COLLECTION_RADIUS = 1
-COLLECTION_RATE   = 2.0
+COLLECTION_RATE   = 2.0   # default fallback
+
+# How many units per collection tick each resource type loads into the bucket.
+# Light/loose materials load faster; dense/sticky/heavy materials load slower.
+# Pile pickup into barrow is slightly faster than harvesting from wild nodes (multiplier > 1)
+PILE_COLLECTION_MULT = 1.18
+
+COLLECTION_RATES = {
+    "dirt":    3.5,   # loose, dry — loads very quickly
+    "wheat":   3.0,   # light stalks
+    "gravel":  2.5,   # loose pebbles
+    "topsoil": 2.5,   # fine and crumbly
+    "manure":  2.5,   # semi-liquid, shovels easily
+    "fertilizer": 2.5,
+    "wood":    2.0,   # standard — hefty but manageable
+    "compost": 1.8,   # chunky organic matter
+    "clay":    1.0,   # sticky, dense — loads slowly
+    "stone":   0.7,   # heavy chunks — very slow to load
+}
 
 # ---- Seasons ----------------------------------------------------------------
 SEASON_DURATION_S = 900
 SEASON_NAMES      = ["spring", "summer", "fall", "winter"]
+
+# Dirt road growth toward player buildings (~tiles added per in-game year at spring)
+ROAD_GROWTH_TILES_MIN = 3
+ROAD_GROWTH_TILES_MAX = 7
 
 # ---- Wheelbarrow condition --------------------------------------------------
 WB_DECAY_PAINT  = 0.015
@@ -72,6 +94,7 @@ UPGRADE_COMPONENTS = {
 RESOURCE_WEIGHTS = {
     "wood":    0.5,
     "wheat":   0.6,
+    "fertilizer": 0.65,
     "compost": 0.7,
     "manure":  0.8,
     "topsoil": 1.2,
@@ -102,7 +125,8 @@ NPC_SHOP_ADJACENCY = 1
 
 SEED_SHOP_ITEMS = {
     "wheat_seed": {"label": "Wheat Seeds ×10", "cost": 25, "qty": 10},
-    "fertilizer": {"label": "Fertilizer ×5",   "cost": 20, "qty": 5},
+    # ~2× manure NPC buy price per unit (manure 5c → 10c/unit → 5 units = 50c)
+    "fertilizer": {"label": "Fertilizer ×5",   "cost": 50, "qty": 5},
 }
 
 # ---- Farming ----------------------------------------------------------------
@@ -121,38 +145,79 @@ CROP_DEFS = {
 }
 
 # ---- Structures -------------------------------------------------------------
+# Pay init_coins to place the construction site, then deposit foundation materials, then building.
 STRUCTURE_DEFS = {
     "stable": {
-        "label": "Horse Stable", "cost_coins": 200, "cost_resources": {},
+        "label": "Horse Stable",
+        "construction": {
+            "init_coins": 200,
+            "foundation": {"stone": 30},
+            "building": {"wood": 40},
+        },
         "produces": "manure", "replenish_rate": 1.0, "max_amount": 200, "collect_fee": 1,
     },
     "gravel_pit": {
-        "label": "Gravel Pit", "cost_coins": 300, "cost_resources": {"gravel": 20},
+        "label": "Gravel Pit",
+        "construction": {
+            "init_coins": 300,
+            "foundation": {"stone": 40},
+            "building": {"gravel": 20, "wood": 15},
+        },
         "produces": "gravel", "replenish_rate": 0.6, "max_amount": 200, "collect_fee": 1,
     },
     "compost_heap": {
-        "label": "Compost Heap", "cost_coins": 150, "cost_resources": {"manure": 10},
+        "label": "Compost Heap",
+        "construction": {
+            "init_coins": 150,
+            "foundation": {"stone": 20},
+            "building": {"manure": 10, "wood": 20},
+        },
         "produces": "compost", "replenish_rate": 0.4, "max_amount": 150, "collect_fee": 1,
     },
     "topsoil_mound": {
-        "label": "Topsoil Mound", "cost_coins": 250, "cost_resources": {"topsoil": 20},
+        "label": "Topsoil Mound",
+        "construction": {
+            "init_coins": 250,
+            "foundation": {"stone": 25},
+            "building": {"topsoil": 20, "wood": 25},
+        },
         "produces": "topsoil", "replenish_rate": 0.5, "max_amount": 150, "collect_fee": 1,
     },
-    # Player market: set custom buy/sell prices, holds inventory
     "market": {
-        "label": "Player Market", "cost_coins": 2000,
-        "cost_resources": {"wood": 50, "stone": 30},
+        "label": "Player Market",
+        "construction": {
+            "init_coins": 2000,
+            "foundation": {"stone": 30},
+            "building": {"wood": 50},
+        },
         "produces": None, "replenish_rate": 0, "max_amount": 0, "collect_fee": 0,
         "is_market": True,
     },
-    # Town hall: claims the town zone, enables taxation and governance
     "town_hall": {
-        "label": "Town Hall", "cost_coins": 5000,
-        "cost_resources": {"stone": 50, "wood": 50, "dirt": 100},
+        "label": "Town Hall",
+        "construction": {
+            "init_coins": 5000,
+            "foundation": {"stone": 50, "gravel": 20},
+            "building": {"wood": 50, "dirt": 100},
+        },
         "produces": None, "replenish_rate": 0, "max_amount": 0, "collect_fee": 0,
         "is_town_hall": True,
     },
+    "silo": {
+        "label": "Grain Silo",
+        "construction": {
+            "init_coins": 500,
+            "foundation": {"stone": 60},
+            "building": {"wood": 80},
+        },
+        "produces": None, "replenish_rate": 0, "max_amount": 0, "collect_fee": 0,
+        "is_silo": True,
+        "silo_capacity": 5000.0,
+    },
 }
+
+# Pile contents that rot in winter (converted to compost on the same tile)
+WINTER_PILE_SPOIL_TYPES = frozenset({"wheat"})
 
 # ---- Towns ------------------------------------------------------------------
 TOWN_ADJ  = ["Old", "New", "Green", "Stone", "River", "Hill", "Dark", "Iron",
@@ -190,9 +255,9 @@ VIEWPORT_RADIUS = 120
 
 # ---- Market -----------------------------------------------------------------
 MARKET_BASE_PRICES = {
-    "manure": 2.0, "gravel": 3.0, "topsoil": 3.0, "compost": 4.0,
+    "manure": 5.0, "gravel": 3.0, "topsoil": 3.0, "compost": 4.0,
     "wood":   3.0, "stone":  4.0, "clay":   2.5,  "dirt":    1.0,
-    "wheat":  5.0,
+    "wheat":  5.0, "fertilizer": 12.0,
 }
 MARKET_DRIFT_INTERVAL  = 60
 MARKET_DRIFT_THRESHOLD = 50

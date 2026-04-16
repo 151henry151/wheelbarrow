@@ -15,6 +15,12 @@ const WS = (() => {
     });
     socket.addEventListener('close', () => {
       console.warn('WS disconnected');
+      const bar = document.getElementById('notice-bar');
+      if (bar) {
+        bar.textContent = 'Disconnected from server — refresh the page to reconnect.';
+        bar.style.display = 'block';
+        bar.style.opacity = '1';
+      }
     });
   }
 
