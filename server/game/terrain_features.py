@@ -4,29 +4,34 @@ Used by world generation and one-time seeding for older databases.
 """
 from __future__ import annotations
 
+import math
 import random
 from typing import Iterable
 
 from server.game.constants import PLAYER_SPAWN, WORLD_H, WORLD_W
 
-
-def _point_in_polygon(x: float, y: float, poly: list[dict]) -> bool:
-    n = len(poly)
-    inside = False
-    j = n - 1
-    for i in range(n):
-        xi, yi = poly[i]["x"], poly[i]["y"]
-        xj, yj = poly[j]["x"], poly[j]["y"]
-        if ((yi > y) != (yj > y)) and (x < (xj - xi) * (y - yi) / (yj - yi + 1e-9) + xi):
-            inside = not inside
-        j = i
-    return inside
+# Keep ponds/streams out of town *cores* and NPC clusters — not the full Voronoi polygon.
+# (Town boundaries partition the whole map; excluding “inside polygon” blocked all water.)
+WATER_EXCLUSION_RADIUS_FROM_TOWN_CENTER = 92
+# Chebyshev padding around each NPC shop tile from npc_district
+WATER_EXCLUSION_PADDING_AROUND_NPC = 10
 
 
-def _point_in_any_town(x: int, y: int, towns: list[dict]) -> bool:
+def _too_close_to_town_core_or_shops(x: int, y: int, towns: list[dict]) -> bool:
+    """True if water should not appear here (near a town center or NPC site)."""
     for t in towns:
-        if _point_in_polygon(float(x), float(y), t["boundary"]):
+        cx, cy = int(t["center_x"]), int(t["center_y"])
+        if math.hypot(x - cx, y - cy) < WATER_EXCLUSION_RADIUS_FROM_TOWN_CENTER:
             return True
+        d = t.get("npc_district")
+        if not d or not isinstance(d, dict):
+            continue
+        for pos in d.values():
+            if not pos or len(pos) < 2:
+                continue
+            px, py = int(pos[0]), int(pos[1])
+            if max(abs(x - px), abs(y - py)) <= WATER_EXCLUSION_PADDING_AROUND_NPC:
+                return True
     return False
 
 
@@ -48,7 +53,7 @@ def generate_water_features(
             return False
         if (tx, ty) in node_positions:
             return False
-        if _point_in_any_town(tx, ty, towns):
+        if _too_close_to_town_core_or_shops(tx, ty, towns):
             return False
         return True
 
@@ -99,22 +104,42 @@ def generate_poor_soil_for_parcels(
     parcels: Iterable[dict],
 ) -> set[tuple[int, int]]:
     """
-    Some tiles in purchasable parcels need dirt improvement before tilling works.
+    Patchy poor soil inside purchasable parcels: Gaussian blobs + per-parcel strength.
+    Some parcels skew mostly good or mostly bad by chance; none are forced all-bad or all-good.
     """
     poor: set[tuple[int, int]] = set()
     for p in parcels:
         w, h = int(p["w"]), int(p["h"])
         x0, y0 = int(p["x"]), int(p["y"])
-        mode = rng.choice(("patchy", "patchy", "patchy", "good", "full_bad"))
-        if mode == "good":
+        area = w * h
+        if area <= 0:
             continue
-        if mode == "full_bad":
-            for dx in range(w):
-                for dy in range(h):
-                    poor.add((x0 + dx, y0 + dy))
-            continue
+
+        n_blobs = rng.randint(1, max(1, min(6, max(2, area // 35))))
+        centers = [
+            (rng.uniform(0, max(0.1, w - 1)), rng.uniform(0, max(0.1, h - 1)))
+            for _ in range(n_blobs)
+        ]
+        sigmas = [
+            max(1.2, min(w, h) * rng.uniform(0.14, 0.38))
+            for _ in range(n_blobs)
+        ]
+        parcel_strength = rng.uniform(0.1, 0.48)
+
+        scores: list[tuple[int, int, float]] = []
         for dx in range(w):
             for dy in range(h):
-                if rng.random() < 0.22:
-                    poor.add((x0 + dx, y0 + dy))
+                s = 0.0
+                for (cx, cy), sig in zip(centers, sigmas):
+                    d2 = (dx - cx) ** 2 + (dy - cy) ** 2
+                    s += math.exp(-d2 / (2.0 * sig * sig))
+                scores.append((dx, dy, s))
+        max_s = max((t[2] for t in scores), default=1.0)
+        if max_s <= 0:
+            max_s = 1.0
+        for dx, dy, s in scores:
+            norm = s / max_s
+            p_tile = min(0.48, parcel_strength * (0.1 + 0.9 * norm))
+            if rng.random() < p_tile:
+                poor.add((x0 + dx, y0 + dy))
     return poor

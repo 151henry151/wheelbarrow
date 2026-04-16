@@ -423,6 +423,13 @@ async def load_all_bridge_progress() -> list[dict]:
             return await cur.fetchall()
 
 
+async def clear_all_poor_soil_tiles() -> None:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("TRUNCATE TABLE poor_soil_tiles")
+
+
 async def insert_poor_soil_bulk(tiles: set[tuple[int, int]] | list[tuple[int, int]]):
     if not tiles:
         return

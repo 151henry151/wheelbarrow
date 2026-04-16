@@ -1822,7 +1822,7 @@ class GameEngine:
             nearby_soil = self._nearby_soil_tiles(px, py)
             nearby_water = self._nearby_water_tiles(px, py)
             nearby_bridges = self._nearby_bridge_tiles(px, py)
-            nearby_poor = self._nearby_poor_soil_tiles(px, py)
+            nearby_poor = self._nearby_poor_soil_tiles(px, py, pid)
             try:
                 await ws.send_json({
                     "type":       "tick",
@@ -2006,12 +2006,19 @@ class GameEngine:
             if abs(x - px) <= VIEWPORT_RADIUS and abs(y - py) <= VIEWPORT_RADIUS
         ]
 
-    def _nearby_poor_soil_tiles(self, px: int, py: int) -> list[dict]:
-        return [
-            {"x": x, "y": y}
-            for (x, y) in self.poor_soil
-            if abs(x - px) <= VIEWPORT_RADIUS and abs(y - py) <= VIEWPORT_RADIUS
-        ]
+    def _nearby_poor_soil_tiles(self, px: int, py: int, player_id: int) -> list[dict]:
+        """Only tiles on land this player owns — used for [I] hints; not shown to others."""
+        out: list[dict] = []
+        for (x, y) in self.poor_soil:
+            if abs(x - px) > VIEWPORT_RADIUS or abs(y - py) > VIEWPORT_RADIUS:
+                continue
+            pid = self.parcel_at.get((x, y))
+            if pid is None:
+                continue
+            par = self.world_parcels.get(pid)
+            if par and par.get("owner_id") == player_id:
+                out.append({"x": x, "y": y})
+        return out
 
     def full_state(self, player_id: int) -> dict:
         player = self.players[player_id]
@@ -2034,7 +2041,7 @@ class GameEngine:
         nearby_soil = self._nearby_soil_tiles(px, py)
         nearby_water = self._nearby_water_tiles(px, py)
         nearby_bridges = self._nearby_bridge_tiles(px, py)
-        nearby_poor = self._nearby_poor_soil_tiles(px, py)
+        nearby_poor = self._nearby_poor_soil_tiles(px, py, player_id)
         return {
             "type":    "init",
             "player":  self._player_wire(player),

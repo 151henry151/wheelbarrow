@@ -65,6 +65,28 @@ sudo systemctl restart wheelbarrow
 
 The MariaDB volume (`db_data`) persists across restarts — player data is safe.
 
+### Terrain migrations (poor soil / water)
+
+After pulling a release that changes **water** or **poor-soil** logic:
+
+1. **Rebuild** the app image if the Dockerfile or dependencies changed; otherwise a restart loads new Python:
+   ```bash
+   cd /home/henry/wheelbarrow
+   docker compose build
+   ```
+
+2. **Poor soil** (replace all tiles with the current algorithm — run once per upgrade that needs it):
+   ```bash
+   docker compose run --rm app python scripts/regenerate_poor_soil.py
+   ```
+
+3. **Restart** the service so the game process reloads terrain from the database:
+   ```bash
+   sudo systemctl restart wheelbarrow
+   ```
+
+**Water:** If `water_tiles` was empty (e.g. older bug), a normal restart after upgrading the server code seeds ponds/streams automatically. If you already have water and only changed unrelated code, skip re-seeding.
+
 ## Resetting the database (destroys all data)
 
 ```bash

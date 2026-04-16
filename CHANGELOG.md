@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.4] - 2026-04-16
+
+### Added
+- **`scripts/regenerate_poor_soil.py`**: clear `poor_soil_tiles` and refill with the current patchy algorithm (fixed RNG seed) for existing worlds
+- **`queries.clear_all_poor_soil_tiles`**: truncate `poor_soil_tiles` before bulk insert
+
+### Changed
+- **Water placement** (`server/game/terrain_features.py`): exclude water only near town **centers** and **NPC district** tiles — not whole Voronoi polygons (which covered the map and prevented any ponds/streams)
+- **Poor soil** (`server/game/terrain_features.py`): replace good/full-bad/i.i.d. modes with **Gaussian blob patches** and per-parcel strength so plots vary organically without being entirely poor or entirely good by fiat
+- **`server/game/engine.py`**: send `poor_soil_tiles` only for tiles on **parcels the player owns** (no scouting via wire)
+- **`client/js/renderer.js`**: remove dashed poor-soil overlay — quality is learned by owning land and tilling / `[I]`, not by map art
+
 ## [0.9.3] - 2026-04-16
 
 ### Changed

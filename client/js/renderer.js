@@ -39,7 +39,6 @@ const Renderer = (() => {
     _drawTiles(_camX, _camY, W, H);
     _drawWater();
     _drawBridges();
-    _drawPoorSoilMarkers();
     _drawTowns();
     _drawParcels();
     _drawRoads();
@@ -106,18 +105,6 @@ const Renderer = (() => {
         ctx.lineTo(ox + 4 + i * 6, oy + T - 7);
         ctx.stroke();
       }
-    }
-  }
-
-  function _drawPoorSoilMarkers() {
-    ctx.lineWidth = 1.2;
-    for (const p of (s.poor_soil_tiles || [])) {
-      const ox = p.x * T, oy = p.y * T;
-      if (ox < _camX - T || ox > _camX + _vpW + T || oy < _camY - T || oy > _camY + _vpH + T) continue;
-      ctx.strokeStyle = 'rgba(160, 110, 55, 0.5)';
-      ctx.setLineDash([4, 4]);
-      ctx.strokeRect(ox + 2, oy + 2, T - 4, T - 4);
-      ctx.setLineDash([]);
     }
   }
 

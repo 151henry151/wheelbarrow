@@ -88,7 +88,7 @@ All NPC shops are ~56 tiles from spawn — not visible at the starting field. Ex
 
 ### Water, bridges, and soil
 - **Water** (ponds and streams) blocks movement until you **fill** a tile on land you own (**`L`** with dirt) or build a **wooden bridge** across it (**`J`**, facing the water; coin + wood per tile). You cannot bridge over another player’s parcel.
-- Some purchased **parcel tiles** are **poor soil** — till will fail until you deposit **1 dirt** per tile (**`I`**).
+- Some purchased **parcel tiles** are **poor soil** (patchy, random per plot) — you cannot see which tiles are poor until you **own** the parcel; till then fails with a notice until you deposit **1 dirt** per tile (**`I`**).
 
 ### Seasons
 The year cycles through **Spring → Summer → Fall → Winter** (15 minutes each). Farming is tuned around the season cycle; the current season and time remaining are shown in the HUD. **Winter** kills crops still in the field; **wheat** left in **piles** on the ground rots into **compost** — **silos** keep stored wheat safe.
@@ -191,4 +191,4 @@ See `wheelbarrow.service` for the service unit template. Deployment is handled m
 
 ## Version
 
-Current version: **0.9.3** (see `VERSION`, `pyproject.toml`, and cache-bust query on scripts in `client/index.html`). See [CHANGELOG.md](CHANGELOG.md).
+Current version: **0.9.4** (see `VERSION`, `pyproject.toml`, and cache-bust query on scripts in `client/index.html`). See [CHANGELOG.md](CHANGELOG.md).
