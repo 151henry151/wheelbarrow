@@ -39,61 +39,70 @@ def _biome(x: int, y: int) -> str:
 BIOME_RESOURCES = {
     "forest":  [("wood",    80,  0.04), ("dirt",   50, 0.06)],
     "rocky":   [("stone",  120,  0.02), ("gravel", 100, 0.03)],
-    "plains":  [("dirt",    60,  0.07), ("manure", 100, 0.50), ("topsoil", 80, 0.40)],
-    "wetland": [("clay",   100,  0.05), ("compost", 80, 0.20)],
+    "plains":  [("dirt",    60,  0.07), ("topsoil", 80, 0.40)],
+    # Manure is a byproduct of player-built Stables — not a wild resource.
+    # Compost is a byproduct of player-built Compost Heaps — not a wild resource.
+    "wetland": [("clay",   100,  0.05), ("topsoil", 60, 0.15)],
 }
 
 # ---- Town placement ---------------------------------------------------------
 
 def _place_towns(rng: random.Random) -> list[dict]:
     """
-    Place TOWN_COUNT towns with irregular, Voronoi-like polygon boundaries.
-    Returns list of town dicts ready for DB insertion (no IDs yet).
+    Place TOWN_COUNT towns with Voronoi-clipped polygon boundaries.
+    Two-pass approach: collect all centers first, then generate each polygon
+    with knowledge of every other center so vertices never cross a neighbor's
+    perpendicular bisector — guaranteeing no two town polygons ever overlap.
     """
+    # Pass 1: place all centers
     centres: list[tuple[int,int]] = []
-
-    # Always place a spawn town near PLAYER_SPAWN
     spawn_cx, spawn_cy = PLAYER_SPAWN
-    adj  = rng.choice(TOWN_ADJ)
-    noun = rng.choice(TOWN_NOUN)
-    radius = 120
-    poly = _generate_polygon(spawn_cx, spawn_cy, radius, rng, points=16)
-    towns: list[dict] = [{
-        "name":     f"{adj}{noun}",
-        "center_x": spawn_cx,
-        "center_y": spawn_cy,
-        "radius":   radius,
-        "boundary": poly,
-    }]
     centres.append((spawn_cx, spawn_cy))
 
     attempts = 0
-    while len(towns) < TOWN_COUNT and attempts < 2000:
+    while len(centres) < TOWN_COUNT and attempts < 2000:
         attempts += 1
         cx = rng.randint(80, WORLD_W - 80)
         cy = rng.randint(80, WORLD_H - 80)
         if any(math.hypot(cx - ox, cy - oy) < TOWN_MIN_DIST for ox, oy in centres):
             continue
-        radius  = rng.randint(TOWN_RADIUS_MIN, TOWN_RADIUS_MAX)
-        points  = rng.randint(10, 18)
-        poly    = _generate_polygon(cx, cy, radius, rng, points=points)
-        adj     = rng.choice(TOWN_ADJ)
-        noun    = rng.choice(TOWN_NOUN)
-        name    = f"{adj}{noun}"
-        # Avoid duplicate names
-        while any(t["name"] == name for t in towns):
+        centres.append((cx, cy))
+
+    # Pass 2: generate a Voronoi-clipped polygon for each center
+    towns: list[dict] = []
+    names_used: set = set()
+    for i, (cx, cy) in enumerate(centres):
+        other = [(ox, oy) for j, (ox, oy) in enumerate(centres) if j != i]
+
+        adj  = rng.choice(TOWN_ADJ)
+        noun = rng.choice(TOWN_NOUN)
+        name = f"{adj}{noun}"
+        while name in names_used:
             adj  = rng.choice(TOWN_ADJ)
             noun = rng.choice(TOWN_NOUN)
             name = f"{adj}{noun}"
-        towns.append({"name": name, "center_x": cx, "center_y": cy, "radius": radius, "boundary": poly})
-        centres.append((cx, cy))
+        names_used.add(name)
+
+        radius = 120 if i == 0 else rng.randint(TOWN_RADIUS_MIN, TOWN_RADIUS_MAX)
+        points = 16  if i == 0 else rng.randint(10, 18)
+        poly   = _generate_polygon(cx, cy, radius, rng, points=points, voronoi_centres=other)
+        towns.append({
+            "name": name, "center_x": cx, "center_y": cy,
+            "radius": radius, "boundary": poly,
+        })
 
     return towns
 
 
-def _generate_polygon(cx: int, cy: int, radius: int, rng: random.Random, points: int = 12) -> list[dict]:
+def _generate_polygon(cx: int, cy: int, radius: int, rng: random.Random,
+                      points: int = 12, voronoi_centres=None) -> list[dict]:
     """
     Generate an irregular polygon around (cx, cy) with approximate radius.
+
+    If voronoi_centres is a list of (ox, oy) tuples, each vertex is clipped to
+    the Voronoi cell: no vertex will extend past the perpendicular bisector to
+    any neighboring center, ensuring polygons never overlap.
+
     Returns list of {x, y} dicts for JSON storage.
     """
     verts = []
@@ -101,10 +110,29 @@ def _generate_polygon(cx: int, cy: int, radius: int, rng: random.Random, points:
         angle  = (2 * math.pi * i / points) + rng.uniform(-0.2, 0.2)
         r      = radius * rng.uniform(0.6, 1.4)
         r      = max(20, min(r, radius * 1.5))
-        vx     = int(cx + math.cos(angle) * r)
-        vy     = int(cy + math.sin(angle) * r)
-        vx     = max(5, min(WORLD_W - 5, vx))
-        vy     = max(5, min(WORLD_H - 5, vy))
+
+        if voronoi_centres:
+            cos_a, sin_a = math.cos(angle), math.sin(angle)
+            for (ox, oy) in voronoi_centres:
+                dvx, dvy = ox - cx, oy - cy
+                # Projection of the direction vector onto the vector toward
+                # the other center. Positive means the vertex is heading toward
+                # that center; negative means away (no constraint needed).
+                proj = cos_a * dvx + sin_a * dvy
+                if proj <= 0:
+                    continue
+                # Distance to the perpendicular bisector along this direction:
+                #   r_bisect = |D|² / (2 · proj)
+                # Keep a small margin (0.9) so boundaries don't touch exactly.
+                r_bisect = (dvx * dvx + dvy * dvy) / (2.0 * proj) * 0.90
+                if r_bisect < r:
+                    r = r_bisect
+            r = max(15, r)   # don't collapse to a point
+
+        vx = int(cx + math.cos(angle) * r)
+        vy = int(cy + math.sin(angle) * r)
+        vx = max(5, min(WORLD_W - 5, vx))
+        vy = max(5, min(WORLD_H - 5, vy))
         verts.append({"x": vx, "y": vy})
     return verts
 
@@ -142,17 +170,19 @@ def _generate_nodes(rng: random.Random) -> list[dict]:
 
     # Guaranteed starter resources — placed near the NPC shops (50-70 tiles from spawn)
     # so new players have to travel a bit to find them.
+    # Only truly wild resources here: wood, stone, gravel, clay, topsoil, dirt.
+    # Manure (from Stable) and compost (from Compost Heap) are never wild.
     for x, y, rtype, max_a, rate in [
-        (sx-55, sy-8, "manure",   100, 0.50),
-        (sx-52, sy+5, "manure",   100, 0.50),
-        (sx+52, sy-8, "manure",   100, 0.50),
-        (sx+55, sy+5, "manure",   100, 0.50),
-        (sx-50, sy+10, "gravel",  100, 0.30),
-        (sx+50, sy+10, "gravel",  100, 0.30),
-        (sx-5,  sy-58, "topsoil",  80, 0.40),
-        (sx+8,  sy-55, "compost",  80, 0.20),
-        (sx-5,  sy+55, "manure",  100, 0.50),
-        (sx+8,  sy+58, "gravel",  100, 0.30),
+        (sx-55, sy-8,  "wood",    80, 0.04),
+        (sx-52, sy+5,  "stone",  120, 0.02),
+        (sx+52, sy-8,  "wood",    80, 0.04),
+        (sx+55, sy+5,  "gravel", 100, 0.03),
+        (sx-50, sy+10, "gravel", 100, 0.03),
+        (sx+50, sy+10, "clay",   100, 0.05),
+        (sx-5,  sy-58, "topsoil", 80, 0.40),
+        (sx+8,  sy-55, "stone",  120, 0.02),
+        (sx-5,  sy+55, "clay",   100, 0.05),
+        (sx+8,  sy+58, "dirt",    60, 0.07),
     ]:
         nodes.append({
             "x": x, "y": y, "node_type": rtype,

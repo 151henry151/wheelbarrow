@@ -89,6 +89,7 @@ canvas { display: block; image-rendering: pixelated; }
   border: 1px solid #555;
   padding: 10px 14px;
   min-width: 190px;
+  max-width: 280px;
   font-size: 0.82rem;
   line-height: 1.8;
   pointer-events: none;

@@ -34,7 +34,11 @@ const Renderer = (() => {
     window.addEventListener('resize', resize);
   }
 
-  function resize() { canvas.width = window.innerWidth; canvas.height = window.innerHeight; }
+  function resize() {
+    canvas.width  = window.innerWidth;
+    canvas.height = window.innerHeight;
+    draw(); // immediately redraw — prevents black flash during window drag
+  }
 
   function draw() {
     if (!s.player) return;
@@ -94,7 +98,8 @@ const Renderer = (() => {
     for (const town of (s.towns || [])) {
       const poly = town.boundary;
       if (!poly || poly.length < 3) continue;
-      const col = TOWN_COLORS[town.id % TOWN_COLORS.length];
+      const col       = TOWN_COLORS[town.id % TOWN_COLORS.length];
+      const isCurrent = s.currentTownId === town.id;
 
       ctx.beginPath();
       ctx.moveTo(poly[0].x * T + T/2, poly[0].y * T + T/2);
@@ -104,14 +109,15 @@ const Renderer = (() => {
       ctx.closePath();
 
       // Very faint interior fill
-      ctx.globalAlpha = 0.04;
+      ctx.globalAlpha = isCurrent ? 0.07 : 0.03;
       ctx.fillStyle = col;
       ctx.fill();
 
-      // Boundary line
-      ctx.globalAlpha = 0.28;
+      // Boundary line — all towns are drawn; Voronoi-clipped polygons never
+      // overlap so adjacent borders share the same edge (no crossing lines).
+      ctx.globalAlpha = isCurrent ? 0.50 : 0.18;
       ctx.strokeStyle = col;
-      ctx.lineWidth = 2.5;
+      ctx.lineWidth   = isCurrent ? 2.5 : 1.0;
       ctx.stroke();
       ctx.globalAlpha = 1.0;
 
@@ -120,9 +126,9 @@ const Renderer = (() => {
       const cny = town.center_y * T + T/2;
       if (cnx > _camX - 300 && cnx < _camX + _vpW + 300 &&
           cny > _camY - 300 && cny < _camY + _vpH + 300) {
-        ctx.globalAlpha = 0.55;
+        ctx.globalAlpha = isCurrent ? 0.85 : 0.45;
         ctx.fillStyle = col;
-        ctx.font = 'bold 13px monospace';
+        ctx.font = isCurrent ? 'bold 13px monospace' : '11px monospace';
         ctx.textAlign = 'center';
         ctx.fillText(town.name, cnx, cny - 12);
         ctx.globalAlpha = 1.0;
