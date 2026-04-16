@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.3] - 2026-04-16
+
+### Changed
+- **World generation** (`server/game/world_gen.py`): increase biome grid density (~3× non-wood wild nodes vs prior step-25 grid); increase forest grove target (~6× wood placement vs prior cluster count); commit a grove only when at least three trees place (no lone wild trees); starter tutorial wood near shops as two three-tree groves; tighten spacing between grove centers and raise placement attempt budget for the larger forest target
+
 ## [0.9.2] - 2026-04-16
 
 ### Changed

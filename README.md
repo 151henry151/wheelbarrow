@@ -100,11 +100,13 @@ The year cycles through **Spring → Summer → Fall → Winter** (15 minutes ea
 | Gravel | Rocky biomes, gravel pits | 3c | Needed for gravel pit build |
 | Topsoil | Plains and wetland biomes | 3c | Needed for topsoil mound build |
 | Compost | Compost heaps (player-built) | 4c | Only from compost heaps — not found in the wild |
-| Wood | Forest biomes (clustered trees) | 3c | Needed for many builds and bridges |
+| Wood | Forest biomes (trees only in groves of 3+; ~higher density on fresh worlds) | 3c | Needed for many builds and bridges |
 | Stone | Map edges | 4c | Needed for Player Market build; very slow replenish |
 | Clay | Mid-map | 2.5c | Moderate replenish |
 | Dirt | Widespread | 1c | Low value, fast replenish |
 | Wheat | Farmed | 5c | Needs farming skill |
+
+**Fresh database / first seed:** wild nodes use a denser biome scatter (~3× stone, gravel, clay, dirt, topsoil, etc. vs the old grid spacing); forest wood uses many more grove placements (~6×) and never adds a standalone tree — each grove commits only if at least three trees land. Tutorial wood near the NPC shops is also three trees per spot, not single stumps.
 
 ---
 
@@ -189,4 +191,4 @@ See `wheelbarrow.service` for the service unit template. Deployment is handled m
 
 ## Version
 
-Current version: **0.9.2** (see `VERSION`, `pyproject.toml`, and cache-bust query on scripts in `client/index.html`). See [CHANGELOG.md](CHANGELOG.md).
+Current version: **0.9.3** (see `VERSION`, `pyproject.toml`, and cache-bust query on scripts in `client/index.html`). See [CHANGELOG.md](CHANGELOG.md).

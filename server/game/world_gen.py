@@ -50,10 +50,13 @@ BIOME_RESOURCES = {
 }
 
 # Wild trees (forest clusters) — more abundant than the old scattered forest wood nodes.
+# Wood target ~6× prior cluster count; non-wood grid uses RESOURCE_GRID_STEP for ~3× density.
 FOREST_WOOD_MAX = 118
 FOREST_WOOD_REPLENISH = 0.085
-FOREST_CLUSTER_TARGET = 92
-FOREST_CLUSTER_MIN_SPACING = 13
+FOREST_CLUSTER_TARGET = 552  # ~6× 92 — grove centers to place
+FOREST_CLUSTER_MIN_SPACING = 10  # slightly tighter so more groves fit in forest biome
+MIN_TREES_PER_FOREST_CLUSTER = 3  # never commit a lone tree — smallest grove is 3 trees
+RESOURCE_GRID_STEP = 14  # ~3× nodes vs step 25 (same hit chance per cell)
 
 # ---- Town placement ---------------------------------------------------------
 
@@ -184,7 +187,7 @@ def _add_forest_clusters(
     """
     cluster_centers: list[tuple[int, int]] = []
     attempts = 0
-    max_attempts = 22000
+    max_attempts = 300000
     while len(cluster_centers) < FOREST_CLUSTER_TARGET and attempts < max_attempts:
         attempts += 1
         cx = rng.randint(30, WORLD_W - 30)
@@ -202,6 +205,7 @@ def _add_forest_clusters(
         kind = rng.randint(0, 1)  # 0 = deciduous stand, 1 = conifer stand
         radius = rng.randint(5, 9)
         n_trees = rng.randint(6, 14)
+        batch: list[dict] = []
         placed = 0
         t_attempts = 0
         while placed < n_trees and t_attempts < n_trees * 30:
@@ -219,13 +223,12 @@ def _add_forest_clusters(
                 continue
             if (tx, ty) in occupied:
                 continue
-            occupied.add((tx, ty))
             variant = kind * 8 + rng.randint(0, 7)
             dist = math.hypot(tx - sx, ty - sy)
             freshness = max(0.42, 1.0 - dist / (WORLD_W * 0.52))
             max_a = FOREST_WOOD_MAX * rng.uniform(0.92, 1.08)
             rate = FOREST_WOOD_REPLENISH * rng.uniform(0.9, 1.1)
-            nodes.append({
+            batch.append({
                 "x": tx,
                 "y": ty,
                 "node_type": "wood",
@@ -236,13 +239,16 @@ def _add_forest_clusters(
             })
             placed += 1
 
-        if placed >= 4:
+        if len(batch) >= MIN_TREES_PER_FOREST_CLUSTER:
+            for n in batch:
+                occupied.add((n["x"], n["y"]))
+                nodes.append(n)
             cluster_centers.append((cx, cy))
 
 
 def _generate_nodes(rng: random.Random) -> list[dict]:
     """
-    Scatter ~500 resource nodes across the world by biome, plus clustered forest wood.
+    Scatter ~1500+ resource nodes across the world by biome (dense grid), plus clustered forest wood.
     Near spawn (±35 tiles) is always seeded with starter resources.
     """
     nodes: list[dict] = []
@@ -253,10 +259,23 @@ def _generate_nodes(rng: random.Random) -> list[dict]:
     # so new players have to travel a bit to find them.
     # Only truly wild resources here: wood, stone, gravel, clay, topsoil, dirt.
     # Manure (from Stable) and compost (from Compost Heap) are never wild.
+    # Starter wood: two 3-tree groves (never lone trees) near the NPC shop ring.
+    for (cx, cy), tv0 in [
+        ((sx - 55, sy - 8), 3),
+        ((sx + 52, sy - 8), 11),
+    ]:
+        for i, (dx, dy) in enumerate([(0, 0), (1, 0), (0, -1)]):
+            x, y = cx + dx, cy + dy
+            occupied.add((x, y))
+            nodes.append({
+                "x": x, "y": y, "node_type": "wood",
+                "current_amount": round(100 * 0.8, 1),
+                "max_amount": 100, "replenish_rate": 0.07,
+                "tree_variant": (tv0 + i) % 16,
+            })
+
     for x, y, rtype, max_a, rate, tv in [
-        (sx - 55, sy - 8,  "wood",    100, 0.07, 3),
         (sx - 52, sy + 5,  "stone",  120, 0.02, 0),
-        (sx + 52, sy - 8,  "wood",    100, 0.07, 11),
         (sx + 55, sy + 5,  "gravel", 100, 0.03, 0),
         (sx - 50, sy + 10, "gravel", 100, 0.03, 0),
         (sx + 50, sy + 10, "clay",   100, 0.05, 0),
@@ -279,13 +298,13 @@ def _generate_nodes(rng: random.Random) -> list[dict]:
 
     _add_forest_clusters(rng, nodes, occupied, sx, sy, near_spawn)
 
-    # Grid scatter: every ~25 tiles, 35% chance of a node
-    for gx in range(0, WORLD_W, 25):
-        for gy in range(0, WORLD_H, 25):
+    # Grid scatter: ~3× denser than legacy (step 25 → RESOURCE_GRID_STEP), 35% chance per cell
+    for gx in range(0, WORLD_W, RESOURCE_GRID_STEP):
+        for gy in range(0, WORLD_H, RESOURCE_GRID_STEP):
             if rng.random() > 0.35:
                 continue
-            x = gx + rng.randint(0, 24)
-            y = gy + rng.randint(0, 24)
+            x = gx + rng.randint(0, RESOURCE_GRID_STEP - 1)
+            y = gy + rng.randint(0, RESOURCE_GRID_STEP - 1)
             x = max(5, min(WORLD_W - 5, x))
             y = max(5, min(WORLD_H - 5, y))
             if near_spawn(x, y):
