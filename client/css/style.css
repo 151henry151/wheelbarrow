@@ -7,7 +7,7 @@ body {
   overflow: hidden;
 }
 
-/* Login */
+/* ------------------------------------------------------------------ Login */
 #login-screen {
   display: flex;
   justify-content: center;
@@ -19,11 +19,12 @@ body {
   border: 2px solid #555;
   padding: 2rem 3rem;
   text-align: center;
-  width: 320px;
+  width: 340px;
 }
-#login-box h1 { font-size: 2rem; margin-bottom: 0.5rem; color: #c8e88a; }
-#login-box p  { font-size: 0.85rem; color: #aaa; margin-bottom: 1.5rem; }
-#username-input {
+#login-box h1  { font-size: 2rem; margin-bottom: 0.4rem; color: #c8e88a; }
+#login-box > p { font-size: 0.85rem; color: #aaa; margin-bottom: 1.2rem; }
+#username-input,
+#password-input {
   width: 100%;
   padding: 0.5rem;
   font-family: monospace;
@@ -31,7 +32,7 @@ body {
   background: #111;
   border: 1px solid #555;
   color: #e8e8e8;
-  margin-bottom: 0.75rem;
+  margin-bottom: 0.5rem;
 }
 #login-btn {
   width: 100%;
@@ -42,48 +43,67 @@ body {
   color: #fff;
   border: none;
   cursor: pointer;
+  margin-bottom: 0.5rem;
 }
 #login-btn:hover { background: #5a9c4f; }
-#login-error { color: #e06060; font-size: 0.8rem; margin-top: 0.5rem; min-height: 1rem; }
+#login-error     { color: #e06060; font-size: 0.8rem; min-height: 1rem; }
+.login-hint      { color: #666; font-size: 0.72rem; margin-top: 0.8rem; line-height: 1.5; }
 
-/* Game */
+/* ------------------------------------------------------------------ Canvas */
 #game-screen { position: relative; }
-canvas {
-  display: block;
-  image-rendering: pixelated;
-}
+canvas { display: block; image-rendering: pixelated; }
 
-/* HUD */
+/* ---------------------------------------------------------------------- HUD */
 #hud {
   position: fixed;
   top: 12px;
   left: 12px;
-  background: rgba(0,0,0,0.65);
+  background: rgba(0,0,0,0.7);
   border: 1px solid #555;
   padding: 10px 14px;
-  min-width: 160px;
-  font-size: 0.85rem;
-  line-height: 1.7;
+  min-width: 180px;
+  font-size: 0.82rem;
+  line-height: 1.8;
+  pointer-events: none;
 }
-#hud-coins { margin-bottom: 6px; font-size: 1rem; }
-#hud-bucket-label { color: #aaa; font-size: 0.75rem; text-transform: uppercase; }
-#hud-bucket-contents { min-height: 1rem; }
-#hud-bucket-bar {
-  height: 6px;
-  background: #333;
-  margin-top: 4px;
-  border-radius: 3px;
-  overflow: hidden;
+#hud-coins          { font-size: 0.95rem; color: #f5c842; }
+#hud-bucket-label   { color: #aaa; font-size: 0.72rem; text-transform: uppercase; }
+#hud-bucket-contents { min-height: 1rem; white-space: pre; }
+#hud-bucket-bar     { height: 5px; background: #333; margin: 3px 0 6px; border-radius: 3px; overflow: hidden; }
+#hud-bucket-fill    { height: 100%; background: #7ab648; width: 0%; transition: width 0.4s; }
+#hud-prices         { color: #888; font-size: 0.72rem; border-top: 1px solid #333; padding-top: 4px; }
+#hud-hint           { color: #f5c842; font-size: 0.76rem; min-height: 1rem; margin-top: 4px; }
+
+/* ------------------------------------------------------------ Build menu */
+#build-menu {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  background: rgba(0,0,0,0.85);
+  border: 1px solid #7ab648;
+  padding: 12px 16px;
+  min-width: 260px;
+  font-size: 0.82rem;
 }
-#hud-bucket-fill {
-  height: 100%;
-  background: #7ab648;
-  width: 0%;
-  transition: width 0.3s;
-}
-#hud-hint {
-  margin-top: 8px;
+#build-menu-title   { color: #7ab648; font-size: 0.9rem; margin-bottom: 8px; }
+#build-menu-items   { line-height: 2; }
+.build-option       { cursor: default; }
+.build-option.affordable  { color: #e8e8e8; }
+.build-option.unaffordable { color: #666; }
+.build-option span.key    { color: #f5c842; }
+.build-menu-close   { color: #666; font-size: 0.72rem; margin-top: 8px; }
+
+/* ----------------------------------------------------------- Notice bar */
+#notice-bar {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0,0,0,0.85);
+  border: 1px solid #888;
+  padding: 8px 20px;
+  font-size: 0.9rem;
   color: #f5c842;
-  font-size: 0.75rem;
-  min-height: 1rem;
+  pointer-events: none;
+  transition: opacity 0.4s;
 }

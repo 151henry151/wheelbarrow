@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-04-15
+
+### Added
+- **Auth**: password-based accounts using bcrypt; new username+password = new account, returning players verify on login; legacy accounts (no password) adopt the first password used
+- **Land system**: world divided into 10×10 tile parcels; players buy parcels for 500 coins with `[B]`; owned parcels rendered with colored overlay and owner name; faint parcel grid lines across the whole world
+- **Building system**: players build structures on owned land with `[P]` build menu + number keys; four structure types: Horse Stable, Gravel Pit, Compost Heap, Topsoil Mound; each has coin + resource costs and produces a specific resource type; other players collect from structures, earning the owner 1 coin per collection
+- **Market price drift**: prices adjust every 60 seconds based on sales volume; high supply pushes prices down, low supply lets them recover toward baseline
+- **Notice bar**: transient on-screen messages for sell confirmations, land purchases, build results, and error feedback
+- **Deploy config**: `deploy/wheelbarrow.hromp.com.nginx.conf` nginx vhost with WebSocket proxy headers; `deploy/README.md` with full step-by-step deployment instructions for `romptele.com`
+- `passlib[bcrypt]` dependency
+
+### Changed
+- Login form now requires a password field
+- `players` table: added `password_hash` column (requires DB volume reset from v0.2.0)
+- HUD: added market prices panel, contextual hints now cover buy/build/collect/sell states
+- `wheelbarrow.service`: updated to run via `docker compose` rather than direct uvicorn
+
 ## [0.2.0] - 2026-04-15
 
 ### Added

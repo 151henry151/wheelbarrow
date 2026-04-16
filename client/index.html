@@ -11,23 +11,35 @@
     <div id="login-box">
       <h1>Wheelbarrow</h1>
       <p>A real-time MMO. You are a wheelbarrow.</p>
-      <input id="username-input" type="text" placeholder="Enter username" maxlength="32" autocomplete="off">
+      <input id="username-input" type="text"     placeholder="Username" maxlength="32" autocomplete="username">
+      <input id="password-input" type="password" placeholder="Password" maxlength="64" autocomplete="current-password">
       <button id="login-btn">Play</button>
       <p id="login-error"></p>
+      <p class="login-hint">New username + password = new account.<br>Returning? Use the same credentials.</p>
     </div>
   </div>
 
   <div id="game-screen" style="display:none">
     <canvas id="game"></canvas>
+
     <div id="hud">
-      <div id="hud-coins">💰 <span id="hud-coins-val">0</span></div>
+      <div id="hud-coins">coins: <span id="hud-coins-val">0</span></div>
       <div id="hud-bucket">
-        <div id="hud-bucket-label">Bucket</div>
-        <div id="hud-bucket-contents"></div>
+        <div id="hud-bucket-label">bucket</div>
+        <div id="hud-bucket-contents">empty</div>
         <div id="hud-bucket-bar"><div id="hud-bucket-fill"></div></div>
       </div>
+      <div id="hud-prices"></div>
       <div id="hud-hint"></div>
     </div>
+
+    <div id="build-menu" style="display:none">
+      <div id="build-menu-title">Build here</div>
+      <div id="build-menu-items"></div>
+      <div class="build-menu-close">[Esc] close</div>
+    </div>
+
+    <div id="notice-bar" style="display:none"></div>
   </div>
 
   <script src="js/ws.js"></script>

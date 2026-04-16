@@ -1,15 +1,18 @@
 const Input = (() => {
-  const MOVE_INTERVAL_MS = 150; // ms between moves while key held
-  const held = {};
+  const MOVE_INTERVAL_MS = 150;
   const dirKeys = { ArrowUp:'up', ArrowDown:'down', ArrowLeft:'left', ArrowRight:'right' };
+  const held = {};
   let lastMove = 0;
   let sendFn = null;
+  let onKey = null;   // callback for non-movement keys
 
-  function init(fn) {
+  function init(fn, keyFn) {
     sendFn = fn;
+    onKey  = keyFn;
     window.addEventListener('keydown', e => {
-      if (dirKeys[e.key]) { e.preventDefault(); held[e.key] = true; }
-      if (e.key === ' ') { e.preventDefault(); sendFn && sendFn({ type: 'sell' }); }
+      if (dirKeys[e.key]) { e.preventDefault(); held[e.key] = true; return; }
+      e.preventDefault();
+      onKey && onKey(e.key);
     });
     window.addEventListener('keyup', e => { delete held[e.key]; });
   }

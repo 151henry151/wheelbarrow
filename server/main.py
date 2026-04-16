@@ -24,24 +24,31 @@ app = FastAPI(title="Wheelbarrow MMO", lifespan=lifespan)
 
 
 # ---------------------------------------------------------------------------
-# REST — login / session
+# REST
 # ---------------------------------------------------------------------------
 
 class LoginRequest(BaseModel):
     username: str
+    password: str
 
 @app.post("/api/login")
 async def login(req: LoginRequest):
     username = req.username.strip()
     if not username or len(username) > 32:
-        raise HTTPException(400, "Invalid username")
-    player = await queries.get_or_create_player(username)
+        raise HTTPException(400, "Username must be 1–32 characters.")
+    if not req.password:
+        raise HTTPException(400, "Password is required.")
+
+    player = await queries.login_or_register(username, req.password)
+    if player is None:
+        raise HTTPException(401, "Incorrect password.")
+
     token = engine.create_session(player)
-    return JSONResponse({"token": token, "player_id": player["id"]})
+    return JSONResponse({"token": token})
 
 
 # ---------------------------------------------------------------------------
-# WebSocket — game connection
+# WebSocket
 # ---------------------------------------------------------------------------
 
 @app.websocket("/ws")
@@ -66,7 +73,7 @@ async def websocket_endpoint(websocket: WebSocket, token: str):
 
 
 # ---------------------------------------------------------------------------
-# Static — serve the client
+# Static
 # ---------------------------------------------------------------------------
 
 app.mount("/", StaticFiles(directory="client", html=True), name="client")
