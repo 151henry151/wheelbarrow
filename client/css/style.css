@@ -125,6 +125,7 @@ canvas { display: block; image-rendering: pixelated; }
 .wb-bar.med { background: #e0c060; }
 .wb-row > span:last-child { width: 26px; text-align: right; font-size: 0.68rem; color: #888; }
 #wb-flat-ind { color: #e06060; font-size: 0.68rem; }
+#wb-rust-ind { color: #c87030; font-size: 0.68rem; }
 #wb-upgrades { border-top: 1px solid #333; margin-top: 6px; padding-top: 4px; font-size: 0.68rem; color: #777; }
 
 /* ------------------------------------------------------------ Overlay menus */

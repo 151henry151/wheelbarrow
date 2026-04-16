@@ -1,3 +1,27 @@
+// Mirrored from server/game/constants.py
+const WB_BARROW_MATERIAL_NAMES = { 1: 'plastic', 2: 'steel',    3: 'aluminium' };
+const WB_TIRE_TYPE_NAMES        = { 1: 'regular', 2: 'tubeless', 3: 'heavy-duty' };
+const WB_HANDLE_MATERIAL_NAMES  = { 1: 'wood',    2: 'steel',    3: 'fiberglass' };
+
+// Chassis weights added to load weight for speed calculation.
+// Positive = heavier = slower; negative = lighter = faster than plastic/wood.
+const WB_BARROW_CHASSIS_WEIGHT = { 1:  0.0, 2:  5.0, 3: -2.0 };
+const WB_HANDLE_CHASSIS_WEIGHT = { 1:  0.0, 2:  1.5, 3: -0.5 };
+
+const RESOURCE_WEIGHTS = {
+  wood:    0.5,
+  wheat:   0.6,
+  compost: 0.7,
+  manure:  0.8,
+  topsoil: 1.2,
+  dirt:    1.5,
+  clay:    1.8,
+  stone:   2.0,
+  gravel:  2.5,
+};
+const RESOURCE_WEIGHT_DEFAULT  = 1.0;
+const RESOURCE_WEIGHT_MAX_UNIT = 2.5;   // gravel — used to normalize speed
+
 // Mirrored from server constants for UI display
 const STRUCTURE_DEFS = {
   stable:        { label: 'Horse Stable',    cost: '200c',                      produces: 'manure'  },
@@ -17,20 +41,28 @@ const REPAIR_OPTIONS = [
   { key: 'paint',  label: 'Repair Paint  (30c per 10%)' },
   { key: 'tire',   label: 'Repair Tire   (50c per 10%)' },
   { key: 'handle', label: 'Repair Handle (60c per 10%)' },
+  { key: 'barrow', label: 'Repair Barrow (45c per 10%)' },
   { key: 'flat',   label: 'Fix Flat Tire (40c flat)'    },
 ];
 const UPGRADE_LABELS = {
-  bucket: 'Barrow size',
-  tire:   'Tire quality',
-  handle: 'Handle quality',
+  bucket: 'Barrow capacity',
+  tire:   'Tire type',
+  handle: 'Handle material',
   barrow: 'Barrow material',
 };
 const UPGRADE_COSTS = {
   bucket: {2:600,  3:1800,  4:5500,  5:16000, 6:45000},
-  tire:   {2:400,  3:1200,  4:4000,  5:12000, 6:35000},
-  handle: {2:500,  3:1500,  4:4500,  5:13000, 6:38000},
-  barrow: {2:700,  3:2000,  4:6000,  5:18000, 6:50000},
+  tire:   {2:400,  3:4000},
+  handle: {2:500,  3:4500},
+  barrow: {2:700,  3:6000},
 };
+
+function _upgradeLevelLabel(comp, level) {
+  if (comp === 'barrow') return WB_BARROW_MATERIAL_NAMES[level] || `L${level}`;
+  if (comp === 'tire')   return WB_TIRE_TYPE_NAMES[level]        || `L${level}`;
+  if (comp === 'handle') return WB_HANDLE_MATERIAL_NAMES[level]  || `L${level}`;
+  return `L${level}`;
+}
 
 const state = {
   player:       null,
@@ -103,6 +135,22 @@ function showNotice(msg) {
   }, 3500);
 }
 
+// ---------------------------------------------------------------- load speed
+function _loadSpeedMult(player) {
+  const bucket = player.bucket || {};
+  const cap    = player.bucket_cap || 10;
+  let totalWeight = 0;
+  for (const [rtype, amount] of Object.entries(bucket)) {
+    totalWeight += (RESOURCE_WEIGHTS[rtype] ?? RESOURCE_WEIGHT_DEFAULT) * amount;
+  }
+  // Add chassis material weights (steel barrow/handle heavier; aluminium/fiberglass lighter)
+  totalWeight += WB_BARROW_CHASSIS_WEIGHT[player.wb_barrow_level] ?? 0;
+  totalWeight += WB_HANDLE_CHASSIS_WEIGHT[player.wb_handle_level] ?? 0;
+  // 1.0 (empty plastic+wood) → ~3.0 (full of gravel with steel chassis)
+  const maxWeight = cap * RESOURCE_WEIGHT_MAX_UNIT;
+  return Math.max(0.5, 1.0 + (totalWeight / maxWeight) * 2.0);
+}
+
 // ---------------------------------------------------------------- town crossing
 function _checkTownCrossing() {
   if (!state.player) return;
@@ -147,8 +195,16 @@ function updateHud() {
   const pLines = Object.entries(pocket).filter(([,v]) => v > 0).map(([k,v]) => `${k}: ${v}`);
   document.getElementById('hud-pocket').textContent = pLines.length ? 'pocket: ' + pLines.join('  ') : '';
 
-  document.getElementById('hud-prices').textContent =
-    Object.entries(state.prices).map(([k,v]) => `${k[0].toUpperCase()}${k.slice(1)}: ${v}c`).join('  ');
+  // Prices only visible when standing at/near a market
+  const px = state.player.x, py = state.player.y;
+  const nearNpcMarket = state.market && Math.abs(px - state.market.x) <= 1 && Math.abs(py - state.market.y) <= 1;
+  const nearPlayerMarket = state.nodes.some(n => n.is_market && Math.abs(n.x - px) <= 1 && Math.abs(n.y - py) <= 1);
+  if (nearNpcMarket || nearPlayerMarket) {
+    document.getElementById('hud-prices').textContent =
+      Object.entries(state.prices).map(([k,v]) => `${k[0].toUpperCase()}${k.slice(1)}: ${v}c`).join('  ');
+  } else {
+    document.getElementById('hud-prices').textContent = '';
+  }
 
   _updateWbHud();
   _updateHint();
@@ -160,6 +216,7 @@ function _updateWbHud() {
     { key: 'paint',  barId: 'wb-paint-bar',  valId: 'wb-paint-val'  },
     { key: 'tire',   barId: 'wb-tire-bar',   valId: 'wb-tire-val'   },
     { key: 'handle', barId: 'wb-handle-bar', valId: 'wb-handle-val' },
+    { key: 'barrow', barId: 'wb-barrow-bar', valId: 'wb-barrow-val' },
   ];
   for (const c of comps) {
     const v   = Math.round(p[`wb_${c.key}`] ?? 100);
@@ -169,8 +226,14 @@ function _updateWbHud() {
     document.getElementById(c.valId).textContent = v;
   }
   document.getElementById('wb-flat-ind').textContent = p.flat_tire ? ' FLAT' : '';
+  // RUST indicator only relevant for steel barrows — plastic and aluminium don't rust
+  const isSteel = (p.wb_barrow_level ?? 1) === 2;
+  document.getElementById('wb-rust-ind').textContent = isSteel && (p.wb_paint ?? 100) < 50 ? ' RUST' : '';
+  const barrowName = WB_BARROW_MATERIAL_NAMES[p.wb_barrow_level] || `L${p.wb_barrow_level}`;
+  const tireName   = WB_TIRE_TYPE_NAMES[p.wb_tire_level]         || `L${p.wb_tire_level}`;
+  const handleName = WB_HANDLE_MATERIAL_NAMES[p.wb_handle_level] || `L${p.wb_handle_level}`;
   document.getElementById('wb-upgrades').textContent =
-    `Barrow L${p.wb_bucket_level}  Tire L${p.wb_tire_level}  Handle L${p.wb_handle_level}  Mat L${p.wb_barrow_level}`;
+    `${barrowName}  ${tireName}  ${handleName}  cap L${p.wb_bucket_level}`;
 }
 
 function _updateHint() {
@@ -294,7 +357,7 @@ function openShopMenu(shopKey) {
         const div = document.createElement('div');
         const affordable = (p.coins || 0) >= e.cost;
         div.className = `build-option ${affordable ? 'affordable' : 'unaffordable'}`;
-        div.innerHTML = `<span class="key">[${i+1}]</span> ${UPGRADE_LABELS[e.comp]} → L${e.level} — ${e.cost}c`;
+        div.innerHTML = `<span class="key">[${i+1}]</span> ${UPGRADE_LABELS[e.comp]} → ${_upgradeLevelLabel(e.comp, e.level)} — ${e.cost}c`;
         items.appendChild(div);
       });
     }
@@ -662,7 +725,8 @@ window.addEventListener('load', () => {
       state.crops   = msg.crops  || [];
       state.prices  = msg.prices;
       state.season  = msg.season;
-      Input.setSpeedMult(state.player.flat_tire ? 3.0 : 1.0);
+      const flatMult = state.player.flat_tire ? 3.0 : 1.0;
+      Input.setSpeedMult(_loadSpeedMult(state.player) * flatMult);
       _checkTownCrossing();
       // Cancel parcel preview if player moved off that parcel
       if (state.parcelPreview !== null) {

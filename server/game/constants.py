@@ -17,38 +17,73 @@ SEASON_NAMES      = ["spring", "summer", "fall", "winter"]
 WB_DECAY_PAINT  = 0.015
 WB_DECAY_TIRE   = 0.020
 WB_DECAY_HANDLE = 0.012
+WB_DECAY_BARROW = 0.005   # only ticks when paint < WB_PAINT_RUST_THRESH
 
-WB_FLAT_THRESH  = 25
-WB_BREAK_THRESH = 15
-WB_HOLE_THRESH  = 20
-WB_SPILL_AMT    = 0.5
+WB_FLAT_THRESH        = 25
+WB_BREAK_THRESH       = 15
+WB_PAINT_RUST_THRESH  = 50   # paint below this → barrow starts to rust
+WB_BARROW_HOLE_THRESH = 60   # barrow below this → cargo starts spilling
+WB_SPILL_AMT          = 0.5
 
 WB_PROB_FLAT  = 0.0030
 WB_PROB_BREAK = 0.0015
-WB_PROB_HOLE  = 0.0040
+WB_PROB_HOLE  = 0.0400   # per-move spill chance base (at WB_BARROW_HOLE_THRESH)
 
-# ---- Wheelbarrow upgrades (6 levels) ----------------------------------------
+# ---- Wheelbarrow material / type names --------------------------------------
+WB_BARROW_MATERIAL_NAMES = {1: "plastic", 2: "steel",    3: "aluminium"}
+WB_TIRE_TYPE_NAMES        = {1: "regular", 2: "tubeless", 3: "heavy-duty"}
+WB_HANDLE_MATERIAL_NAMES  = {1: "wood",    2: "steel",    3: "fiberglass"}
+
+# Chassis weights added to movement-speed calculation (client uses these).
+# Positive = heavier = slower; negative = lighter = faster.
+# Steel barrow and steel handle are heavier; aluminium/fiberglass are lighter.
+WB_BARROW_CHASSIS_WEIGHT = {1:  0.0, 2:  5.0, 3: -2.0}  # plastic / steel / aluminium
+WB_HANDLE_CHASSIS_WEIGHT = {1:  0.0, 2:  1.5, 3: -0.5}  # wood    / steel / fiberglass
+
+# ---- Wheelbarrow upgrades ---------------------------------------------------
+# Bucket size: 6 tiers (capacity upgrade, not tied to a material type)
 WB_BUCKET_CAP  = {1: 10, 2: 16, 3: 26, 4: 40, 5: 60, 6: 85}
 WB_BUCKET_COST = {2: 600, 3: 1800, 4: 5500, 5: 16000, 6: 45000}
 
-WB_TIRE_FLAT_MULT = {1: 1.00, 2: 0.72, 3: 0.50, 4: 0.33, 5: 0.20, 6: 0.11}
-WB_TIRE_COST      = {2: 400,  3: 1200, 4: 4000, 5: 12000, 6: 35000}
+# Tires: 3 named types — regular → tubeless → heavy-duty
+# Lower mult = lower flat-tyre probability per move
+WB_TIRE_FLAT_MULT = {1: 1.00, 2: 0.50, 3: 0.11}
+WB_TIRE_COST      = {2: 400,  3: 4000}
 
-WB_HANDLE_BREAK_MULT = {1: 1.00, 2: 0.70, 3: 0.48, 4: 0.30, 5: 0.18, 6: 0.10}
-WB_HANDLE_COST       = {2: 500,  3: 1500, 4: 4500, 5: 13000, 6: 38000}
+# Handles: 3 named materials — wood → steel → fiberglass
+# Lower mult = lower handle-break probability per move
+WB_HANDLE_BREAK_MULT = {1: 1.00, 2: 0.48, 3: 0.10}
+WB_HANDLE_COST       = {2: 500,  3: 4500}
 
-WB_BARROW_DECAY_MULT = {1: 1.00, 2: 0.75, 3: 0.55, 4: 0.38, 5: 0.22, 6: 0.12}
-WB_BARROW_COST       = {2: 700,  3: 2000, 4: 6000, 5: 18000, 6: 50000}
+# Barrow material: 3 named types — plastic → steel → aluminium
+# Lower mult = slower overall decay (paint, barrow health)
+# Rust behaviour differs per material (see wb_condition.py)
+WB_BARROW_DECAY_MULT = {1: 1.00, 2: 0.55, 3: 0.12}
+WB_BARROW_COST       = {2: 700,  3: 6000}
 
 UPGRADE_COMPONENTS = {
-    "bucket": (WB_BUCKET_CAP,       WB_BUCKET_COST,       "Barrow size"),
-    "tire":   (WB_TIRE_FLAT_MULT,   WB_TIRE_COST,         "Tire quality"),
-    "handle": (WB_HANDLE_BREAK_MULT, WB_HANDLE_COST,      "Handle quality"),
-    "barrow": (WB_BARROW_DECAY_MULT, WB_BARROW_COST,      "Barrow material"),
+    "bucket": (WB_BUCKET_CAP,        WB_BUCKET_COST,  "Barrow capacity"),
+    "tire":   (WB_TIRE_FLAT_MULT,    WB_TIRE_COST,    "Tire type"),
+    "handle": (WB_HANDLE_BREAK_MULT, WB_HANDLE_COST,  "Handle material"),
+    "barrow": (WB_BARROW_DECAY_MULT, WB_BARROW_COST,  "Barrow material"),
 }
 
+# ---- Resource weights (heavier = slower movement when loaded) ---------------
+RESOURCE_WEIGHTS = {
+    "wood":    0.5,
+    "wheat":   0.6,
+    "compost": 0.7,
+    "manure":  0.8,
+    "topsoil": 1.2,
+    "dirt":    1.5,
+    "clay":    1.8,
+    "stone":   2.0,
+    "gravel":  2.5,
+}
+RESOURCE_WEIGHT_DEFAULT = 1.0
+
 # ---- Repair -----------------------------------------------------------------
-REPAIR_COST_PER_PCT = {"paint": 0.30, "tire": 0.50, "handle": 0.60}
+REPAIR_COST_PER_PCT = {"paint": 3.0, "tire": 5.0, "handle": 6.0, "barrow": 4.5}
 REPAIR_FLAT_COST    = 40
 
 # ---- NPC shops --------------------------------------------------------------

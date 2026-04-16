@@ -13,7 +13,7 @@ Inspired by the spirit of [A Tractor](https://store.steampowered.com/app/779050/
 ## Gameplay
 
 ### The basics
-- Move with **arrow keys** (slower when you have a flat tyre)
+- Move with **arrow keys** — speed depends on your load; heavier materials (gravel, stone) slow you significantly; an empty aluminium barrow is faster than a loaded plastic one
 - **Park near a resource** and your bucket slowly fills — proximity collection is passive
 - **Haul your load** to the NPC market (`50,60`) and press **Space** to sell
 - Wild resources **deplete** over time, forcing you to travel further from spawn to find fresh nodes
@@ -43,15 +43,22 @@ Inspired by the spirit of [A Tractor](https://store.steampowered.com/app/779050/
 6. **Build a Player Market** (2000c + 50 wood + 30 stone) — set custom buy and sell prices for any goods; the most powerful economic tool in the game
 7. **Farm wheat** — buy seeds from the Seed Shop, plant on owned land, optionally fertilize for double yield, harvest in ~10–20 min
 8. **Build a Town Hall** (5000c + materials) to become a town's founder — name it, set a sales tax (0–30%), and govern which structures and goods are allowed
-9. **Upgrade your wheelbarrow** at the General Store — larger bucket, better tyres, stronger handle, better barrow material (6 levels each, very expensive at top end)
+9. **Upgrade your wheelbarrow** at the General Store — larger bucket (6 tiers), tire type (regular → tubeless → heavy-duty), handle material (wood → steel → fiberglass), and barrow material (plastic → steel → aluminium); material choices affect both speed and maintenance
 
 ### Wheelbarrow condition
 Your wheelbarrow degrades as you move:
-- **Paint** fades — eventual holes cause cargo to spill while moving (buy stainless barrow to slow this)
+- **Paint** fades — when it drops below 50% on a **steel** barrow, the metal starts to rust
+- **Barrow** (structural) — plastic wears physically over time; steel rusts when paint is low (repair paint first); aluminium barely degrades; when below 60%, cargo can spill during long journeys
 - **Tyre** wears — random flat tyre when condition is low; flat tyre triples move time until repaired
 - **Handle** wears — random break when condition is low; broken handle = immobile until repaired
 
-Repair at the **Repair Shop** (50,44). Upgrades reduce wear rates.
+Repair all components at the **Repair Shop** (500, 444). Upgrades reduce wear rates.
+
+### Barrow materials and speed
+Your choice of barrow material, handle material, and current load all affect movement speed:
+- **Gravel and stone** are the heaviest loads; **wood and wheat** are light
+- **Steel** barrow and handle are heavier than plastic/wood — slower even when empty, but more durable
+- **Aluminium** barrow and **fiberglass** handle are lighter than plastic/wood — faster and virtually maintenance-free, but expensive
 
 ### Towns
 The world contains 40 procedurally generated towns with irregular polygon boundaries and names like "Greenford" or "Ironwick". Entering a town shows its name and any sales tax. Town leaders govern through the Town Hall:
@@ -67,7 +74,7 @@ All NPC shops are ~56 tiles from spawn — not visible at the starting field. Ex
 | Shop | Location | Sells |
 |---|---|---|
 | Seed Shop | (556, 500) | Wheat seeds, fertilizer |
-| General Store | (444, 500) | Wheelbarrow upgrades (6 levels each) |
+| General Store | (444, 500) | Wheelbarrow upgrades (bucket: 6 tiers; tire/handle/barrow: 3 named tiers) |
 | Repair Shop | (500, 444) | Condition repairs, flat tyre fix |
 
 ### Seasons
@@ -76,10 +83,10 @@ The year cycles through **Spring → Summer → Fall → Winter** (15 minutes ea
 ### Resource types
 | Resource | Where | NPC price | Notes |
 |---|---|---|---|
-| Manure | Near spawn, horse stables | 2c | Starter resource |
-| Gravel | Near spawn, gravel pits | 3c | Needed for gravel pit build |
-| Topsoil | Near spawn | 3c | Needed for topsoil mound build |
-| Compost | Near spawn | 4c | High replenish cost structure |
+| Manure | Horse stables (player-built) | 2c | Only from stables — not found in the wild |
+| Gravel | Rocky biomes, gravel pits | 3c | Needed for gravel pit build |
+| Topsoil | Plains and wetland biomes | 3c | Needed for topsoil mound build |
+| Compost | Compost heaps (player-built) | 4c | Only from compost heaps — not found in the wild |
 | Wood | Forest corners | 3c | Needed for Player Market build |
 | Stone | Map edges | 4c | Needed for Player Market build; very slow replenish |
 | Clay | Mid-map | 2.5c | Moderate replenish |
@@ -167,4 +174,4 @@ See `wheelbarrow.service` for the service unit template. Deployment is handled m
 
 ## Version
 
-Current version: **0.5.0**. See [CHANGELOG.md](CHANGELOG.md).
+Current version: **0.6.0**. See [CHANGELOG.md](CHANGELOG.md).

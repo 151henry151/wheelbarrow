@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS players (
     wb_tire           FLOAT DEFAULT 100,
     wb_handle         FLOAT DEFAULT 100,
     flat_tire         TINYINT DEFAULT 0,
+    wb_barrow         FLOAT DEFAULT 100,
     wb_bucket_level   TINYINT DEFAULT 1,
     wb_tire_level     TINYINT DEFAULT 1,
     wb_handle_level   TINYINT DEFAULT 1,

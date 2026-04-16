@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-04-16
+
+### Added
+- **Load-based movement speed**: empty wheelbarrow moves at full speed; heavier loads slow you down proportionally — a full load of gravel is 3× slower than an empty barrow; wood and wheat are light, stone and gravel are heavy; chassis material also contributes (steel barrow/handle adds drag, aluminium/fiberglass reduces it)
+- **Named material tiers** for barrow, tire, and handle (3 tiers each, replacing the old 6-level numbered system):
+  - Barrow: plastic (default) → steel (700c) → aluminium (6000c); plastic is light and doesn't rust; steel is heavier and rusts without paint; aluminium is lightest, never rusts, and barely degrades
+  - Tire: regular (default) → tubeless (400c) → heavy-duty (4000c)
+  - Handle: wood (default) → steel (500c) → fiberglass (4500c); steel handle is heavier; fiberglass is lightest
+- **Barrow structural health** (`wb_barrow` stat, 100 = pristine): decay varies by barrow material — steel rusts when paint < 50%; plastic wears physically over time; aluminium barely degrades; shown in WB condition HUD alongside paint/tire/handle
+- **`RUST` indicator** (orange) in WB HUD next to paint bar — shown only when barrow is steel and paint has dropped below 50%
+- **Cargo spillage from barrow damage**: when barrow health drops below 60%, there is a small per-move chance of losing 0.5 units of cargo through a hole — scales with how degraded the barrow is; a heavily damaged barrow can lose ~10% of a full load on a long journey
+- **Barrow repair at Repair Shop**: new "Repair Barrow (45c per 10%)" option; for steel barrows, repair paint first to stop the rusting, then repair structural damage
+- **Market-contextual prices**: resource prices in the HUD are hidden while roaming; they appear only when standing at the NPC market or adjacent to a player market, since different markets pay different prices
+
+### Fixed
+- **Town borders crossing**: world generation now uses a two-pass Voronoi approach — all town centres are placed first, then each polygon is clipped to its Voronoi cell so boundaries never overlap
+- **Wild manure and compost removed**: these resources are now exclusively produced by player-built structures (Stables and Compost Heaps)
+- **Repair shop costs corrected**: cost constants now match the labels in-game (paint 30c/10%, tire 50c/10%, handle 60c/10%)
+
 ## [0.5.0] - 2026-04-16
 
 ### Added

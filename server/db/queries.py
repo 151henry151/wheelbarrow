@@ -39,7 +39,7 @@ async def save_player(player: dict):
             await cur.execute(
                 """UPDATE players
                    SET coins=%s, x=%s, y=%s, bucket=%s, bucket_cap=%s, pocket=%s,
-                       wb_paint=%s, wb_tire=%s, wb_handle=%s, flat_tire=%s,
+                       wb_paint=%s, wb_tire=%s, wb_handle=%s, wb_barrow=%s, flat_tire=%s,
                        wb_bucket_level=%s, wb_tire_level=%s, wb_handle_level=%s, wb_barrow_level=%s,
                        last_seen=NOW()
                    WHERE id=%s""",
@@ -47,7 +47,8 @@ async def save_player(player: dict):
                  json.dumps(player.get("bucket", {})), player["bucket_cap"],
                  json.dumps(player.get("pocket", {})),
                  player.get("wb_paint", 100), player.get("wb_tire", 100),
-                 player.get("wb_handle", 100), player.get("flat_tire", 0),
+                 player.get("wb_handle", 100), player.get("wb_barrow", 100),
+                 player.get("flat_tire", 0),
                  player.get("wb_bucket_level", 1), player.get("wb_tire_level", 1),
                  player.get("wb_handle_level", 1), player.get("wb_barrow_level", 1),
                  player["id"]),

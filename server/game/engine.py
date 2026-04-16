@@ -177,6 +177,7 @@ class GameEngine:
         player.setdefault("wb_paint",        100.0)
         player.setdefault("wb_tire",         100.0)
         player.setdefault("wb_handle",       100.0)
+        player.setdefault("wb_barrow",       100.0)
         player.setdefault("flat_tire",       0)
         player.setdefault("wb_bucket_level", 1)
         player.setdefault("wb_tire_level",   1)
@@ -1034,6 +1035,7 @@ class GameEngine:
             "wb_paint":  round(p.get("wb_paint",  100), 1),
             "wb_tire":   round(p.get("wb_tire",   100), 1),
             "wb_handle": round(p.get("wb_handle", 100), 1),
+            "wb_barrow": round(p.get("wb_barrow", 100), 1),
             "flat_tire": p.get("flat_tire", 0),
             "wb_bucket_level": p.get("wb_bucket_level", 1),
             "wb_tire_level":   p.get("wb_tire_level",   1),
