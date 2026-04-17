@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.5] - 2026-04-17
+
+### Added
+- **Client** (`client/js/terrain.js`): rolling elevation field, `Terrain.worldY` / `Terrain.moveIntervalMult` for mild hills (uphill slower, downhill faster)
+- **Server** (`server/game/terrain_elevation.py`): mirror elevation math for documentation and future server use
+
+### Changed
+- **Client** (`client/js/input.js`, `client/js/renderer.js`): **arrow keys** move **camera-relative** (up/down along view toward/away from camera; left/right strafe); `Renderer.getCameraMoveBasis()` supplies forward/right from orbit yaw/pitch/distance
+- **Client** (`client/js/game.js`): **sell autopilot** step pacing uses the same interval formula as keyboard (load, flat tyre, terrain)
+- **Client** (`client/js/renderer.js`): **frustum-based tile culling** for grass/water/roads/entities — fixes diagonal “empty wedge” from old canvas-pixel bounds; raise **max zoom-out** (`DIST_MAX` 720 → 1600); increase **instanced mesh caps** for larger visible area; slightly **reduce exponential fog** density so distance reads clearer
+
 ## [0.10.4] - 2026-04-17
 
 ### Changed

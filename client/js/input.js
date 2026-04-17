@@ -1,3 +1,4 @@
+/* global Renderer, Terrain */
 const Input = (() => {
   const BASE_INTERVAL_MS = 150;
   const dirKeys = { ArrowUp:'up', ArrowDown:'down', ArrowLeft:'left', ArrowRight:'right' };
@@ -25,17 +26,71 @@ const Input = (() => {
     speedMult = mult;
   }
 
-  function update(now) {
+  function update(now, player, world) {
     if (!sendFn || autopilotBlocked) return;
-    const interval = BASE_INTERVAL_MS * speedMult;
-    if (now - lastMove < interval) return;
-    for (const [key, dir] of Object.entries(dirKeys)) {
-      if (held[key]) {
-        sendFn({ type: 'move', dir });
-        lastMove = now;
-        break;
+
+    let dir = null;
+    let terrainM = 1;
+
+    if (typeof Renderer !== 'undefined' && typeof Renderer.getCameraMoveBasis === 'function') {
+      const { fx, fz } = Renderer.getCameraMoveBasis();
+      let vx = 0;
+      let vz = 0;
+      if (held.ArrowUp) { vx += fx; vz += fz; }
+      if (held.ArrowDown) { vx -= fx; vz -= fz; }
+      if (held.ArrowLeft) { vx += fz; vz -= fx; }
+      if (held.ArrowRight) { vx -= fz; vz += fx; }
+      const len = Math.hypot(vx, vz);
+      if (len < 1e-8) return;
+      const nx = vx / len;
+      const nz = vz / len;
+      let best = 'up';
+      let bestDot = -Infinity;
+      const cardinals = [
+        ['up', -nz],
+        ['down', nz],
+        ['left', -nx],
+        ['right', nx],
+      ];
+      for (const [name, d] of cardinals) {
+        if (d > bestDot) {
+          bestDot = d;
+          best = name;
+        }
       }
+      dir = best;
+      if (player && typeof Terrain !== 'undefined') {
+        terrainM = Terrain.moveIntervalMult(
+          player.x,
+          player.y,
+          dir,
+          world && world.w,
+          world && world.h,
+        );
+      }
+    } else {
+      for (const [key, d] of Object.entries(dirKeys)) {
+        if (held[key]) {
+          dir = d;
+          if (player && typeof Terrain !== 'undefined') {
+            terrainM = Terrain.moveIntervalMult(
+              player.x,
+              player.y,
+              dir,
+              world && world.w,
+              world && world.h,
+            );
+          }
+          break;
+        }
+      }
+      if (!dir) return;
     }
+
+    const interval = BASE_INTERVAL_MS * speedMult * terrainM;
+    if (now - lastMove < interval) return;
+    sendFn({ type: 'move', dir });
+    lastMove = now;
   }
 
   function setAutopilotBlocked(v) {

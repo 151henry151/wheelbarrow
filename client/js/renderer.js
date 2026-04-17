@@ -2,7 +2,7 @@
  * Wheelbarrow — Three.js WebGL renderer (perspective + follow camera).
  * World: game tile (x, y) maps to scene position (x*T+T/2, z, y*T+T/2) with Y up.
  */
-/* global THREE */
+/* global THREE, Terrain */
 const Renderer = (() => {
   const T = 32;
 
@@ -36,13 +36,13 @@ const Renderer = (() => {
   let groundGroup;
   let grassMesh;
   let grassMat;
-  const MAX_GRASS = 6000;
+  const MAX_GRASS = 16000;
   let waterMesh;
   let waterMat;
-  const MAX_WATER = 2000;
+  const MAX_WATER = 6000;
   let roadMesh;
   let roadMat;
-  const MAX_ROAD = 2000;
+  const MAX_ROAD = 6000;
   let dynamicRoot;
   let overlayRoot;
 
@@ -50,7 +50,7 @@ const Renderer = (() => {
   const PITCH_MIN = 0.06;
   const PITCH_MAX = 1.52;
   const DIST_MIN = 180;
-  const DIST_MAX = 720;
+  const DIST_MAX = 1600;
 
   let _camYaw = 0.55;
   let _camPitch = 0.88;
@@ -67,6 +67,9 @@ const Renderer = (() => {
   /** Created in init() so this file never touches THREE before three.min.js runs. */
   let _dummy;
   let _c;
+  let _raycaster;
+  let _groundPlane;
+  let _planeHit;
   const nodePool = [];
   let nodePoolUsed = 0;
   const pilePool = [];
@@ -109,7 +112,7 @@ const Renderer = (() => {
     const sky = SEASON_SKY[name] ?? SEASON_SKY.spring;
     const fg = SEASON_FOG[name] ?? SEASON_FOG.spring;
     scene.background = new THREE.Color(sky);
-    scene.fog = new THREE.FogExp2(fg, 0.00038);
+    scene.fog = new THREE.FogExp2(fg, 0.00028);
     if (hemi && amb) {
       if (name === 'summer') {
         hemi.intensity = 0.55;
@@ -136,6 +139,9 @@ const Renderer = (() => {
     }
     _dummy = new THREE.Object3D();
     _c = new THREE.Color();
+    _planeHit = new THREE.Vector3();
+    _raycaster = new THREE.Raycaster();
+    _groundPlane = new THREE.Plane();
     scene = new THREE.Scene();
 
     camera = new THREE.PerspectiveCamera(48, 1, 2, 12000);
@@ -267,6 +273,11 @@ const Renderer = (() => {
     return { x: gx * T + T / 2, z: gy * T + T / 2 };
   }
 
+  function _groundY(tx, ty) {
+    if (typeof Terrain !== 'undefined') return Terrain.worldY(tx, ty);
+    return 0;
+  }
+
   function _updateCamera(px, py) {
     const { x: tx, z: tz } = _worldXZ(px, py);
     const cp = Math.cos(_camPitch);
@@ -277,7 +288,78 @@ const Renderer = (() => {
     const offZ = _camDist * cp * cy;
     const offY = _camDist * sp;
     camera.position.set(tx + offX, offY, tz + offZ);
-    camera.lookAt(tx, 8, tz);
+    const aimY = _groundY(px, py) + 12;
+    camera.lookAt(tx, aimY, tz);
+  }
+
+  /**
+   * Horizontal basis in world XZ (tile x → +X, tile y → +Z) for camera-relative steering.
+   * Forward = into the view (from camera toward the wheelbarrow, then continuing past them).
+   * Down arrow uses -forward (toward the camera / screen-bottom feel).
+   */
+  function getCameraMoveBasis() {
+    const cp = Math.cos(_camPitch);
+    const cy = Math.cos(_camYaw);
+    const sy = Math.sin(_camYaw);
+    const offX = _camDist * cp * sy;
+    const offZ = _camDist * cp * cy;
+    let fx = -offX;
+    let fz = -offZ;
+    const flen = Math.hypot(fx, fz);
+    if (flen < 1e-8) {
+      fx = 0;
+      fz = -1;
+    } else {
+      fx /= flen;
+      fz /= flen;
+    }
+    const rx = -fz;
+    const rz = fx;
+    return { fx, fz, rx, rz };
+  }
+
+  const _NDC_FRUSTUM_SAMPLES = [
+    [-1, -1], [1, -1], [1, 1], [-1, 1],
+    [0, -1], [1, 0], [0, 1], [-1, 0], [0, 0],
+  ];
+
+  /**
+   * Tile indices (inclusive) whose ground may appear in the current view.
+   * Uses frustum vs ground plane — the old canvas-pixel rect was wrong for perspective and caused diagonal cutoffs.
+   */
+  function _visibleTileRange(wx, wy, px, py) {
+    if (!_raycaster || !_groundPlane || !camera || !_planeHit) return null;
+    const planeY = _groundY(px, py);
+    _groundPlane.set(new THREE.Vector3(0, 1, 0), -planeY);
+    const pcx = px * T + T / 2;
+    const pcz = py * T + T / 2;
+    let minX = pcx;
+    let maxX = pcx;
+    let minZ = pcz;
+    let maxZ = pcz;
+    camera.updateMatrixWorld(true);
+    for (let i = 0; i < _NDC_FRUSTUM_SAMPLES.length; i++) {
+      const nx = _NDC_FRUSTUM_SAMPLES[i][0];
+      const ny = _NDC_FRUSTUM_SAMPLES[i][1];
+      _raycaster.setFromCamera(new THREE.Vector2(nx, ny), camera);
+      if (_raycaster.ray.intersectPlane(_groundPlane, _planeHit)) {
+        minX = Math.min(minX, _planeHit.x);
+        maxX = Math.max(maxX, _planeHit.x);
+        minZ = Math.min(minZ, _planeHit.z);
+        maxZ = Math.max(maxZ, _planeHit.z);
+      }
+    }
+    const margin = T * 2;
+    minX -= margin;
+    maxX += margin;
+    minZ -= margin;
+    maxZ += margin;
+    const sx = Math.max(0, Math.floor(minX / T));
+    const sy = Math.max(0, Math.floor(minZ / T));
+    const ex = Math.min(wx - 1, Math.floor(maxX / T));
+    const ey = Math.min(wy - 1, Math.floor(maxZ / T));
+    if (ex < sx || ey < sy) return null;
+    return { sx, sy, ex, ey };
   }
 
   function _setGrassTiles(sx, sy, ex, ey) {
@@ -288,7 +370,7 @@ const Renderer = (() => {
       for (let tx = sx; tx <= ex && i < MAX_GRASS; tx++) {
         if (tx < 0 || ty < 0 || tx >= wx || ty >= wy) continue;
         const { x, z } = _worldXZ(tx, ty);
-        _dummy.position.set(x, 0, z);
+        _dummy.position.set(x, _groundY(tx, ty), z);
         _dummy.rotation.set(0, 0, 0);
         _dummy.scale.set(1, 1, 1);
         _dummy.updateMatrix();
@@ -315,7 +397,7 @@ const Renderer = (() => {
     const pushW = (tx, ty) => {
       if (wi >= MAX_WATER) return;
       const { x, z } = _worldXZ(tx, ty);
-      _dummy.position.set(x, 0.35, z);
+      _dummy.position.set(x, _groundY(tx, ty) + 0.35, z);
       _dummy.rotation.set(0, 0, 0);
       _dummy.scale.set(1, 1, 1);
       _dummy.updateMatrix();
@@ -324,7 +406,7 @@ const Renderer = (() => {
     const pushR = (tx, ty) => {
       if (ri >= MAX_ROAD) return;
       const { x, z } = _worldXZ(tx, ty);
-      _dummy.position.set(x, 1, z);
+      _dummy.position.set(x, _groundY(tx, ty) + 1, z);
       _dummy.updateMatrix();
       roadMesh.setMatrixAt(ri++, _dummy.matrix);
     };
@@ -351,12 +433,13 @@ const Renderer = (() => {
       if (st.x < sx - 1 || st.x > ex + 1 || st.y < sy - 1 || st.y > ey + 1) continue;
       const ox = st.x * T;
       const oz = st.y * T;
+      const gy = _groundY(st.x, st.y) + 1.2;
       for (let i = 0; i < 4; i++) {
         const x0 = ox + 5 + i * 7;
         const z0 = oz + 5;
         const x1 = ox + 4 + i * 7;
         const z1 = oz + T - 5;
-        pts.push(new THREE.Vector3(x0, 1.2, z0), new THREE.Vector3(x1, 1.2, z1));
+        pts.push(new THREE.Vector3(x0, gy, z0), new THREE.Vector3(x1, gy, z1));
       }
     }
     if (!pts.length) return;
@@ -373,7 +456,7 @@ const Renderer = (() => {
       const g = new THREE.BoxGeometry(T - 6, 3, T - 8);
       const m = new THREE.MeshLambertMaterial({ color: 0x6e5234 });
       const mesh = new THREE.Mesh(g, m);
-      mesh.position.set(x, 2.5, z);
+      mesh.position.set(x, _groundY(b.x, b.y) + 2.5, z);
       mesh.castShadow = true;
       mesh.receiveShadow = true;
       dynamicRoot.add(mesh);
@@ -403,13 +486,13 @@ const Renderer = (() => {
       });
       const mesh = new THREE.Mesh(geom, mat);
       mesh.rotation.x = -Math.PI / 2;
-      mesh.position.y = 0.4;
+      mesh.position.y = _groundY(town.center_x, town.center_y) + 0.4;
       overlayRoot.add(mesh);
       const edges = new THREE.LineLoop(
         new THREE.BufferGeometry().setFromPoints(
           poly.map((q) => {
             const w = _worldXZ(q.x, q.y);
-            return new THREE.Vector3(w.x, 1.2, w.z);
+            return new THREE.Vector3(w.x, _groundY(q.x, q.y) + 1.2, w.z);
           }),
         ),
         new THREE.LineBasicMaterial({
@@ -421,7 +504,7 @@ const Renderer = (() => {
       overlayRoot.add(edges);
       const cnx = town.center_x * T + T / 2;
       const cny = town.center_y * T + T / 2;
-      _spriteText(town.name, cnx, 40, cny, col, true);
+      _spriteText(town.name, cnx, _groundY(town.center_x, town.center_y) + 40, cny, col, true);
     }
   }
 
@@ -470,6 +553,9 @@ const Renderer = (() => {
       if (isPreview) { color = 0xffdc32; op = 0.2; }
       else if (isMine) { color = 0x64c864; op = 0.1; }
       else if (isCurrent && !p.owner_id) { color = 0xffffcc; op = 0.08; }
+      const tcx = Math.floor(p.x + p.w / 2);
+      const tcy = Math.floor(p.y + p.h / 2);
+      const gBase = _groundY(tcx, tcy);
       const g = new THREE.PlaneGeometry(pw, ph);
       g.rotateX(-Math.PI / 2);
       const m = new THREE.MeshBasicMaterial({
@@ -479,9 +565,9 @@ const Renderer = (() => {
         depthWrite: false,
       });
       const mesh = new THREE.Mesh(g, m);
-      mesh.position.set(cx, 0.55, cz);
+      mesh.position.set(cx, gBase + 0.55, cz);
       overlayRoot.add(mesh);
-      const h = 0.5;
+      const h = gBase + 0.5;
       const line = new THREE.LineSegments(
         new THREE.EdgesGeometry(new THREE.PlaneGeometry(pw - 1, ph - 1)),
         new THREE.LineBasicMaterial({
@@ -494,11 +580,11 @@ const Renderer = (() => {
       line.position.set(cx, h, cz);
       overlayRoot.add(line);
       if (isPreview) {
-        _spriteText(`${p.price}c`, cx, 28, cz, 0xffdc32, true);
+        _spriteText(`${p.price}c`, cx, gBase + 28, cz, 0xffdc32, true);
       } else if (isMine && pw >= 32) {
-        _spriteText(p.owner_name || '', cx, 22, cz, 0x88ff88, false);
+        _spriteText(p.owner_name || '', cx, gBase + 22, cz, 0x88ff88, false);
       } else if (p.owner_id && isCurrent && pw >= 32) {
-        _spriteText(p.owner_name || '?', cx, 22, cz, 0xffaa88, false);
+        _spriteText(p.owner_name || '?', cx, gBase + 22, cz, 0xffaa88, false);
       }
     }
   }
@@ -747,7 +833,8 @@ const Renderer = (() => {
       const grp = _ensureNodeMesh(nodePoolUsed++);
       _fillNodeGroup(grp, node);
       const { x, z } = _worldXZ(node.x, node.y);
-      grp.position.set(x, 0, z);
+      const gy = _groundY(node.x, node.y);
+      grp.position.set(x, gy, z);
       grp.visible = true;
       const pct = Math.min(1, node.amount / (node.max || 100));
       if (!node.construction_active && !node.is_town_hall && !node.is_market) {
@@ -759,7 +846,7 @@ const Renderer = (() => {
         grp.add(bar);
       }
       if (node.owner_name && (node.is_structure || node.is_market)) {
-        _spriteText(node.owner_name, x, 48, z, 0xccffaa, false);
+        _spriteText(node.owner_name, x, gy + 48, z, 0xccffaa, false);
       }
     }
     _hideNodePool();
@@ -769,22 +856,24 @@ const Renderer = (() => {
     for (const m of s.npc_markets || []) {
       if (m.x < sx - 2 || m.x > ex + 2 || m.y < sy - 2 || m.y > ey + 2) continue;
       const { x, z } = _worldXZ(m.x, m.y);
+      const my = _groundY(m.x, m.y);
       const grp = _marketMesh(0xb89010, 0xf0d050);
-      grp.position.set(x, 0, z);
+      grp.position.set(x, my, z);
       dynamicRoot.add(grp);
-      _spriteText('Market', x, 52, z, 0xffe080, true);
+      _spriteText('Market', x, my + 52, z, 0xffe080, true);
     }
     for (const shop of s.npc_shops || []) {
       if (shop.x < sx - 2 || shop.x > ex + 2 || shop.y < sy - 2 || shop.y > ey + 2) continue;
       const { x, z } = _worldXZ(shop.x, shop.y);
+      const sy = _groundY(shop.x, shop.y);
       let grp;
       if (shop.label.includes('Seed')) grp = _marketMesh(0x206020, 0x40a040);
       else if (shop.label.includes('General')) grp = _marketMesh(0x404080, 0x6060a0);
       else grp = _marketMesh(0x804040, 0xa06060);
-      grp.position.set(x, 0, z);
+      grp.position.set(x, sy, z);
       dynamicRoot.add(grp);
       const shortName = shop.label.replace(' Shop', '').replace(' Store', '');
-      _spriteText(shortName, x, 48, z, 0xccccff, false);
+      _spriteText(shortName, x, sy + 48, z, 0xccccff, false);
     }
   }
 
@@ -809,6 +898,7 @@ const Renderer = (() => {
       const grp = _ensurePile(pilePoolUsed++);
       while (grp.children.length) grp.remove(grp.children[0]);
       const { x, z } = _worldXZ(pile.x, pile.y);
+      const pileGy = _groundY(pile.x, pile.y);
       const col = colors[pile.resource_type] || 0x888888;
       const n = Math.min(5, 2 + Math.floor((pile.amount || 0) / 20));
       for (let i = 0; i < n; i++) {
@@ -821,10 +911,10 @@ const Renderer = (() => {
         m.castShadow = true;
         grp.add(m);
       }
-      grp.position.set(x, 0, z);
+      grp.position.set(x, pileGy, z);
       grp.visible = true;
       if (pile.sell_price != null) {
-        _spriteText(`${pile.sell_price}c`, x, 28 + n * 3, z, 0xf5c842, true);
+        _spriteText(`${pile.sell_price}c`, x, pileGy + 28 + n * 3, z, 0xf5c842, true);
       }
     }
     for (let i = pilePoolUsed; i < pilePool.length; i++) pilePool[i].visible = false;
@@ -846,6 +936,7 @@ const Renderer = (() => {
       const grp = _ensureCrop(cropPoolUsed++);
       while (grp.children.length) grp.remove(grp.children[0]);
       const { x, z } = _worldXZ(crop.x, crop.y);
+      const cy = _groundY(crop.x, crop.y);
       if (crop.winter_dead) {
         for (let i = 0; i < 3; i++) {
           const m = new THREE.Mesh(
@@ -873,7 +964,7 @@ const Renderer = (() => {
           grp.add(blade);
         }
       }
-      grp.position.set(x, 0, z);
+      grp.position.set(x, cy, z);
       grp.visible = true;
     }
     for (let i = cropPoolUsed; i < cropPool.length; i++) cropPool[i].visible = false;
@@ -932,7 +1023,8 @@ const Renderer = (() => {
     }
     grp.rotation.y = yaw;
     if (label && grp.userData.wx != null) {
-      _spriteText(label, grp.userData.wx, 42, grp.userData.wz, 0xffffff, true);
+      const gyy = grp.userData.gy != null ? grp.userData.gy : 0;
+      _spriteText(label, grp.userData.wx, gyy + 42, grp.userData.wz, 0xffffff, true);
     }
   }
 
@@ -953,7 +1045,9 @@ const Renderer = (() => {
       const face = s._otherFacing[p.id] || 'down';
       const grp = _ensureWb(wbPoolUsed++);
       const { x, z } = _worldXZ(p.x, p.y);
-      grp.position.set(x, 0, z);
+      const gy = _groundY(p.x, p.y);
+      grp.userData.gy = gy;
+      grp.position.set(x, gy, z);
       grp.userData.wx = x;
       grp.userData.wz = z;
       _wheelbarrow3d(grp, '#6ab0e8', p.flat_tire, 0, face, p.username || '');
@@ -966,12 +1060,14 @@ const Renderer = (() => {
       const face = s.facing || 'down';
       const grp = _ensureWb(wbPoolUsed++);
       const { x, z } = _worldXZ(s.player.x, s.player.y);
-      grp.position.set(x, 0, z);
+      const gy = _groundY(s.player.x, s.player.y);
+      grp.userData.gy = gy;
+      grp.position.set(x, gy, z);
       grp.userData.wx = x;
       grp.userData.wz = z;
       _wheelbarrow3d(grp, '#f5c842', s.player.flat_tire, Math.min(1, total / cap), face, null);
       grp.visible = true;
-      if (s.player.username) _spriteText(s.player.username, x, 38, z, 0xf5c842, true);
+      if (s.player.username) _spriteText(s.player.username, x, gy + 38, z, 0xf5c842, true);
     }
     for (let i = wbPoolUsed; i < wbPool.length; i++) wbPool[i].visible = false;
   }
@@ -997,13 +1093,15 @@ const Renderer = (() => {
     if (!Number.isFinite(s.player.x) || !Number.isFinite(s.player.y)) return;
     _vpW = W;
     _vpH = H;
-    _camX = s.player.x * T - W / 2 + T / 2;
-    _camY = s.player.y * T - H / 2 + T / 2;
+    const px = s.player.x;
+    const py = s.player.y;
+    _camX = px * T - W / 2 + T / 2;
+    _camY = py * T - H / 2 + T / 2;
 
     try {
     _applySeasonAtmosphere();
-    const sunX = s.player.x * T + T / 2;
-    const sunZ = s.player.y * T + T / 2;
+    const sunX = px * T + T / 2;
+    const sunZ = py * T + T / 2;
     sun.position.set(sunX + 420, 880, sunZ + 260);
 
     while (dynamicRoot.children.length) {
@@ -1027,10 +1125,25 @@ const Renderer = (() => {
 
     const wx = s.world ? s.world.w : 1000;
     const wy = s.world ? s.world.h : 1000;
-    const sx = Math.max(0, Math.floor(_camX / T));
-    const sy = Math.max(0, Math.floor(_camY / T));
-    const ex = Math.min(wx - 1, Math.ceil((_camX + W) / T));
-    const ey = Math.min(wy - 1, Math.ceil((_camY + H) / T));
+
+    _updateCamera(px, py);
+    let sx;
+    let sy;
+    let ex;
+    let ey;
+    const vr = _visibleTileRange(wx, wy, px, py);
+    if (vr) {
+      sx = vr.sx;
+      sy = vr.sy;
+      ex = vr.ex;
+      ey = vr.ey;
+    } else {
+      const span = Math.ceil(Math.max(W, H) / T) + 12;
+      sx = Math.max(0, Math.floor(px - span));
+      sy = Math.max(0, Math.floor(py - span));
+      ex = Math.min(wx - 1, Math.ceil(px + span));
+      ey = Math.min(wy - 1, Math.ceil(py + span));
+    }
 
     _setGrassTiles(sx, sy, ex, ey);
     _waterAndRoadsInView(sx, sy, ex, ey);
@@ -1044,12 +1157,11 @@ const Renderer = (() => {
     _crops(sx, sy, ex, ey);
     _players(sx, sy, ex, ey);
 
-    _updateCamera(s.player.x, s.player.y);
     renderer.render(scene, camera);
     } catch (err) {
       console.error('Wheelbarrow renderer.draw:', err);
     }
   }
 
-  return { init, draw };
+  return { init, draw, getCameraMoveBasis };
 })();

@@ -227,6 +227,24 @@ function waitNextTick() {
   });
 }
 
+/** Matches Input + Terrain pacing (client-side move throttle). */
+const MOVE_BASE_INTERVAL_MS = 150;
+function _moveIntervalMsForDir(dir) {
+  if (!state.player) return MOVE_BASE_INTERVAL_MS;
+  const flatMult = state.player.flat_tire ? 3.0 : 1.0;
+  let terrainM = 1;
+  if (typeof Terrain !== 'undefined') {
+    terrainM = Terrain.moveIntervalMult(
+      state.player.x,
+      state.player.y,
+      dir,
+      state.world && state.world.w,
+      state.world && state.world.h,
+    );
+  }
+  return MOVE_BASE_INTERVAL_MS * _loadSpeedMult(state.player) * flatMult * terrainM;
+}
+
 function _nextDirToward(px, py, tx, ty) {
   if (px < tx) return 'right';
   if (px > tx) return 'left';
@@ -247,9 +265,15 @@ async function _autopilotMoveToTile(tx, ty) {
     const dir = _nextDirToward(px, py, tx, ty);
     if (!dir) break;
     state.facing = dir;
+    const wantMs = _moveIntervalMsForDir(dir);
+    const t0 = typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now();
     WS.send({ type: 'move', dir });
     await waitNextTick();
     if (state.player.x === px && state.player.y === py) await waitNextTick();
+    const elapsed = (typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now()) - t0;
+    if (elapsed < wantMs) {
+      await new Promise(resolve => setTimeout(resolve, wantMs - elapsed));
+    }
   }
   return state.player.x === tx && state.player.y === ty;
 }
@@ -1221,7 +1245,7 @@ window.addEventListener('load', () => {
     });
 
     function loop(now) {
-      Input.update(now);
+      Input.update(now, state.player, state.world);
       Renderer.draw();
       updateHud();
       if (!state.hudVisible && state.player) {
