@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.2] - 2026-04-17
+
+### Fixed
+- **Client** (`client/js/renderer.js`): call **`_applySeasonAtmosphere()`** only **after** **Ambient** / **Hemisphere** lights exist — **`init()`** had invoked it first, leaving **`hemi` undefined** and throwing in the browser (black screen)
+
 ## [0.10.1] - 2026-04-16
 
 ### Fixed

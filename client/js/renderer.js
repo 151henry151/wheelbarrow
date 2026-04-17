@@ -101,18 +101,20 @@ const Renderer = (() => {
     const fg = SEASON_FOG[name] ?? SEASON_FOG.spring;
     scene.background = new THREE.Color(bg);
     scene.fog = new THREE.FogExp2(fg, 0.00045);
-    if (name === 'summer') {
-      hemi.intensity = 0.55;
-      amb.intensity = 0.38;
-    } else if (name === 'winter') {
-      hemi.intensity = 0.42;
-      amb.intensity = 0.5;
-    } else if (name === 'fall') {
-      hemi.intensity = 0.48;
-      amb.intensity = 0.35;
-    } else {
-      hemi.intensity = 0.52;
-      amb.intensity = 0.36;
+    if (hemi && amb) {
+      if (name === 'summer') {
+        hemi.intensity = 0.55;
+        amb.intensity = 0.38;
+      } else if (name === 'winter') {
+        hemi.intensity = 0.42;
+        amb.intensity = 0.5;
+      } else if (name === 'fall') {
+        hemi.intensity = 0.48;
+        amb.intensity = 0.35;
+      } else {
+        hemi.intensity = 0.52;
+        amb.intensity = 0.36;
+      }
     }
   }
 
@@ -126,7 +128,6 @@ const Renderer = (() => {
     _dummy = new THREE.Object3D();
     _c = new THREE.Color();
     scene = new THREE.Scene();
-    _applySeasonAtmosphere();
 
     camera = new THREE.PerspectiveCamera(48, 1, 2, 12000);
     camera.up.set(0, 1, 0);
@@ -165,6 +166,8 @@ const Renderer = (() => {
     sun.shadow.camera.top = 1400;
     sun.shadow.camera.bottom = -1400;
     scene.add(sun);
+
+    _applySeasonAtmosphere();
 
     groundGroup = new THREE.Group();
     scene.add(groundGroup);
