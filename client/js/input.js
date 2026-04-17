@@ -37,8 +37,9 @@ const Input = (() => {
     let turn = 0;
     if (held.ArrowUp) fwd += 1;
     if (held.ArrowDown) fwd -= 1;
-    if (held.ArrowLeft) turn += 1;
-    if (held.ArrowRight) turn -= 1;
+    // Positive server turn increases angle (clockwise in x-right, y-down space); screen “left” is CCW.
+    if (held.ArrowLeft) turn -= 1;
+    if (held.ArrowRight) turn += 1;
     fwd = Math.max(-1, Math.min(1, fwd));
     turn = Math.max(-1, Math.min(1, turn));
 

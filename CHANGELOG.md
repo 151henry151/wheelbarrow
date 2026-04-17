@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.7] - 2026-04-17
+
+### Fixed
+- **Client** (`client/js/renderer.js`): **ground vanishing when zoomed out + low pitch** — raise grass/water/road instance caps (**65536** / **12000** / **12000**); **clamp** visible tile rect to a frustum-centered square when over budget (was filling only the first **16k** tiles of a huge rect); **ease fog** further when **zoomed out** so long view rays do not wash terrain away
+
+## [0.11.6] - 2026-04-17
+
+### Fixed
+- **Client** (`client/js/input.js`): **invert tank steer** — **Left** decreases turn, **Right** increases it (matches server `angle` integration and sell autopilot)
+
 ## [0.11.5] - 2026-04-17
 
 ### Added

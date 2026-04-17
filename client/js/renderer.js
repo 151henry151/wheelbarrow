@@ -38,13 +38,14 @@ const Renderer = (() => {
   let groundGroup;
   let grassMesh;
   let grassMat;
-  const MAX_GRASS = 16000;
+  /** Zoomed-out + low pitch can cover 50k+ tile rects; cap iteration and center on view. */
+  const MAX_GRASS = 65536;
   let waterMesh;
   let waterMat;
-  const MAX_WATER = 6000;
+  const MAX_WATER = 12000;
   let roadMesh;
   let roadMat;
-  const MAX_ROAD = 6000;
+  const MAX_ROAD = 12000;
   let dynamicRoot;
   let overlayRoot;
 
@@ -121,7 +122,10 @@ const Renderer = (() => {
         ? (_camPitch - PITCH_MIN) / (PITCH_MAX - PITCH_MIN)
         : 1;
     const u = Math.max(0, Math.min(1, t));
-    const density = FOG_DENSITY_TOPDOWN * (0.06 + 0.94 * Math.pow(u, 1.15));
+    let density = FOG_DENSITY_TOPDOWN * (0.06 + 0.94 * Math.pow(u, 1.15));
+    // Far camera + shallow pitch: long view rays through fog; ease more when zoomed out.
+    const distEase = Math.min(1.35, Math.max(0.28, DIST_MIN / Math.max(DIST_MIN, _camDist)));
+    density *= distEase;
     scene.fog = new THREE.FogExp2(fg, density);
     if (hemi && amb) {
       if (name === 'summer') {
@@ -417,6 +421,30 @@ const Renderer = (() => {
     const ey = Math.min(wy - 1, Math.floor(maxZ / T));
     if (ex < sx || ey < sy) return null;
     return { sx, sy, ex, ey };
+  }
+
+  /**
+   * When the frustum projects to more tiles than we can instance, shrink to a square centered on
+   * the frustum so we never “run out” of grass mid-rectangle (which looked like missing ground).
+   */
+  function _clampTileRectToBudget(sx, sy, ex, ey, wx, wy, maxTiles) {
+    const w = ex - sx + 1;
+    const h = ey - sy + 1;
+    if (w <= 0 || h <= 0) return { sx, sy, ex, ey };
+    if (w * h <= maxTiles) return { sx, sy, ex, ey };
+    const cx = Math.floor((sx + ex) / 2);
+    const cy = Math.floor((sy + ey) / 2);
+    let half = Math.min(Math.floor(Math.sqrt(maxTiles) / 2), wx, wy);
+    while (half > 0) {
+      const nsx = Math.max(0, cx - half);
+      const nex = Math.min(wx - 1, cx + half);
+      const nsy = Math.max(0, cy - half);
+      const ney = Math.min(wy - 1, cy + half);
+      const area = (nex - nsx + 1) * (ney - nsy + 1);
+      if (area <= maxTiles) return { sx: nsx, sy: nsy, ex: nex, ey: ney };
+      half -= 1;
+    }
+    return { sx: cx, sy: cy, ex: cx, ey: cy };
   }
 
   function _setGrassTiles(sx, sy, ex, ey) {
@@ -1238,6 +1266,12 @@ const Renderer = (() => {
       ex = Math.min(wx - 1, Math.ceil(px + span));
       ey = Math.min(wy - 1, Math.ceil(py + span));
     }
+
+    const clipped = _clampTileRectToBudget(sx, sy, ex, ey, wx, wy, MAX_GRASS);
+    sx = clipped.sx;
+    sy = clipped.sy;
+    ex = clipped.ex;
+    ey = clipped.ey;
 
     _setGrassTiles(sx, sy, ex, ey);
     _waterAndRoadsInView(sx, sy, ex, ey);
