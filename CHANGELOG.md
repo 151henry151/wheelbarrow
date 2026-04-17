@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-04-17
+
+### Changed
+- **Client** (`client/js/renderer.js`): **Ground rendering** — grass limited to a **circle** around the player (no square corner artifact); **radial blend** of instance grass color toward a matching **horizon tint** at the outer ring; huge **grass-colored backdrop plane** under the world (`fog: false`, `depthWrite: false`) so distance reads as continuous green; **grass** material uses **`fog: false`** so it stays green with the backdrop; **water/roads** still use the full **camera frustum** tile rect (not the grass circle)
+
 ## [0.11.8] - 2026-04-17
 
 ### Fixed

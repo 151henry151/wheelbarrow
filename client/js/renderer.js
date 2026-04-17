@@ -36,10 +36,15 @@ const Renderer = (() => {
   let sun;
   let hemi;
   let groundGroup;
+  /** Solid grass-colored plane under detail tiles — fog disabled so horizon stays green. */
+  let horizonGrass;
   let grassMesh;
   let grassMat;
   /** Zoomed-out + low pitch can cover 50k+ tile rects; cap iteration and center on view. */
   const MAX_GRASS = 65536;
+  /** Radial fade band at grass edge (world units ≈ tiles × T). */
+  const GRASS_FADE_TILES = 22;
+  const HORIZON_PLANE_SIZE = 340000;
   let waterMesh;
   let waterMat;
   const MAX_WATER = 12000;
@@ -200,10 +205,25 @@ const Renderer = (() => {
     groundGroup = new THREE.Group();
     scene.add(groundGroup);
 
+    const hzCol = new THREE.Color();
+    hzCol.setRGB(0.22, 0.32, 0.2);
+    horizonGrass = new THREE.Mesh(
+      new THREE.PlaneGeometry(HORIZON_PLANE_SIZE, HORIZON_PLANE_SIZE),
+      new THREE.MeshLambertMaterial({
+        color: hzCol,
+        fog: false,
+        depthWrite: false,
+      }),
+    );
+    horizonGrass.rotation.x = -Math.PI / 2;
+    horizonGrass.renderOrder = -20;
+    groundGroup.add(horizonGrass);
+
     const grassGeo = new THREE.PlaneGeometry(T, T);
     grassGeo.rotateX(-Math.PI / 2);
     // Per-tile colors use InstancedMesh instanceColor — do not set vertexColors: true (breaks instance tint).
     grassMat = new THREE.MeshLambertMaterial();
+    grassMat.fog = false;
     grassMesh = new THREE.InstancedMesh(grassGeo, grassMat, MAX_GRASS);
     grassMesh.receiveShadow = true;
     grassMesh.castShadow = false;
@@ -423,41 +443,31 @@ const Renderer = (() => {
     return { sx, sy, ex, ey };
   }
 
-  /**
-   * When the frustum projects to more tiles than we can instance, shrink to a square centered on
-   * the **player tile**, not the frustum AABB center. At shallow pitch the ground AABB is huge and
-   * skewed toward the horizon — its center can sit far in front of the player, so a budget square
-   * around that center omitted tiles near the camera and under the character (distant ground still
-   * drew inside the same over-large rect before the row loop hit MAX_GRASS).
-   */
-  function _clampTileRectToBudget(sx, sy, ex, ey, wx, wy, maxTiles, px, py) {
-    const w = ex - sx + 1;
-    const h = ey - sy + 1;
-    if (w <= 0 || h <= 0) return { sx, sy, ex, ey };
-    if (w * h <= maxTiles) return { sx, sy, ex, ey };
-    const cx = Math.max(0, Math.min(wx - 1, Math.floor(px)));
-    const cy = Math.max(0, Math.min(wy - 1, Math.floor(py)));
-    let half = Math.floor(Math.sqrt(maxTiles) / 2);
-    while (half > 0) {
-      const nsx = Math.max(0, cx - half);
-      const nex = Math.min(wx - 1, cx + half);
-      const nsy = Math.max(0, cy - half);
-      const ney = Math.min(wy - 1, cy + half);
-      const area = (nex - nsx + 1) * (ney - nsy + 1);
-      if (area <= maxTiles) return { sx: nsx, sy: nsy, ex: nex, ey: ney };
-      half -= 1;
-    }
-    return { sx: cx, sy: cy, ex: cx, ey: cy };
+  function _smoothstep01(edge0, edge1, x) {
+    const t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)));
+    return t * t * (3 - 2 * t);
   }
 
-  function _setGrassTiles(sx, sy, ex, ey) {
+  /**
+   * Grass in a **circle** around the player (no square corners). Outer ring blends tile color
+   * toward the horizon plane color so the edge softens into the infinite green backdrop.
+   */
+  function _setGrassTiles(px, py, wx, wy, hzR, hzG, hzB) {
+    const rTiles = Math.sqrt(MAX_GRASS / Math.PI);
+    const rFade0 = Math.max(0, rTiles - GRASS_FADE_TILES);
+
     let i = 0;
-    const wx = s.world ? s.world.w : 1000;
-    const wy = s.world ? s.world.h : 1000;
     const waterKey = new Set((s.water_tiles || []).map((w) => `${w.x},${w.y}`));
-    for (let ty = sy; ty <= ey && i < MAX_GRASS; ty++) {
-      for (let tx = sx; tx <= ex && i < MAX_GRASS; tx++) {
+    const bbox = Math.ceil(rTiles) + 2;
+    const tcx = Math.floor(px);
+    const tcy = Math.floor(py);
+    for (let ty = tcy - bbox; ty <= tcy + bbox && i < MAX_GRASS; ty++) {
+      for (let tx = tcx - bbox; tx <= tcx + bbox && i < MAX_GRASS; tx++) {
         if (tx < 0 || ty < 0 || tx >= wx || ty >= wy) continue;
+        const dx = tx + 0.5 - px;
+        const dy = ty + 0.5 - py;
+        const dist = Math.hypot(dx, dy);
+        if (dist > rTiles) continue;
         if (waterKey.has(`${tx},${ty}`)) continue;
         const { x, z } = _worldXZ(tx, ty);
         _dummy.position.set(x, _groundY(tx, ty), z);
@@ -468,10 +478,14 @@ const Renderer = (() => {
         const base = _fieldGrassRgb(tx, ty);
         const cx = x + Math.sin(ty * 0.58 + tx * 0.13) * 2.5;
         const cz = z + Math.cos(tx * 0.52 + ty * 0.11) * 2.5;
-        const dx = (cx - x) / T;
-        const dz = (cz - z) / T;
-        const shade = 1 - 0.12 * (dx * dx + dz * dz);
-        _c.setRGB(base.r * shade, base.g * shade, base.b * shade);
+        const ddx = (cx - x) / T;
+        const ddz = (cz - z) / T;
+        const shade = 1 - 0.12 * (ddx * ddx + ddz * ddz);
+        const edgeBlend = _smoothstep01(rFade0, rTiles, dist);
+        const r = base.r * shade * (1 - edgeBlend) + hzR * edgeBlend;
+        const g = base.g * shade * (1 - edgeBlend) + hzG * edgeBlend;
+        const b = base.b * shade * (1 - edgeBlend) + hzB * edgeBlend;
+        _c.setRGB(r, g, b);
         grassMesh.setColorAt(i, _c);
         i++;
       }
@@ -1270,13 +1284,12 @@ const Renderer = (() => {
       ey = Math.min(wy - 1, Math.ceil(py + span));
     }
 
-    const clipped = _clampTileRectToBudget(sx, sy, ex, ey, wx, wy, MAX_GRASS, px, py);
-    sx = clipped.sx;
-    sy = clipped.sy;
-    ex = clipped.ex;
-    ey = clipped.ey;
+    const gwy = _groundY(px, py);
+    horizonGrass.position.set(px * T + T / 2, gwy - 0.35, py * T + T / 2);
+    const hzRgb = _fieldGrassRgb(Math.floor(px), Math.floor(py));
+    horizonGrass.material.color.setRGB(hzRgb.r, hzRgb.g, hzRgb.b);
 
-    _setGrassTiles(sx, sy, ex, ey);
+    _setGrassTiles(px, py, wx, wy, hzRgb.r, hzRgb.g, hzRgb.b);
     _waterAndRoadsInView(sx, sy, ex, ey);
     _soilFurrows(sx, sy, ex, ey);
     _bridges(sx, sy, ex, ey);
