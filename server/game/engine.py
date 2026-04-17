@@ -385,6 +385,13 @@ class GameEngine:
     def _soil_ready_for_planting(self, tx: int, ty: int) -> bool:
         return self.soil.get((tx, ty), 0) == 1
 
+    def _tile_has_blocking_pile(self, tx: int, ty: int) -> bool:
+        """Any resource pile with amount on this tile blocks till and plant until cleared."""
+        pm = self.piles.get((tx, ty))
+        if not pm:
+            return False
+        return any(float(p.get("amount", 0) or 0) > 0 for p in pm.values())
+
     async def _grow_roads_new_year(self):
         """Each spring: add a few dirt tiles extending toward player structures not yet by a road."""
         blocked = self._structure_footprint_tiles()
@@ -1277,6 +1284,10 @@ class GameEngine:
             if not parcel or parcel.get("owner_id") != player_id:
                 await self._send(player_id, {"type": "notice", "msg": "Not your land."})
                 return
+            if self._tile_has_blocking_pile(tx, ty):
+                await self._send(player_id, {"type": "notice",
+                    "msg": "Clear the resource pile on this tile (load into your barrow) before you can till."})
+                return
             if (tx, ty) in self.poor_soil:
                 await self._send(player_id, {"type": "notice",
                     "msg": "Poor soil — deposit 1 dirt here ([I]) before you can till away the stubble."})
@@ -1376,6 +1387,11 @@ class GameEngine:
         # No crop — own land only for till / plant
         if not parcel or parcel.get("owner_id") != player_id:
             await self._send(player_id, {"type": "notice", "msg": "You can only farm on your own land."})
+            return
+
+        if self._tile_has_blocking_pile(tx, ty):
+            await self._send(player_id, {"type": "notice",
+                "msg": "Clear the resource pile on this tile (load into your barrow) before you can till or plant."})
             return
 
         if self._soil_ready_for_planting(tx, ty):
@@ -1807,7 +1823,8 @@ class GameEngine:
         """Other clients only need wheelbarrows for players with an active WebSocket."""
         return [
             {"id": p["id"], "username": p["username"], "x": p["x"], "y": p["y"],
-             "flat_tire": p.get("flat_tire", 0)}
+             "flat_tire": p.get("flat_tire", 0),
+             "wb_paint": round(p.get("wb_paint", 100), 1)}
             for p in self.players.values() if p["id"] in self.sockets
         ]
 

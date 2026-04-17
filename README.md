@@ -91,7 +91,7 @@ All NPC shops are ~56 tiles from spawn — not visible at the starting field. Ex
 - Some purchased **parcel tiles** are **poor soil** (patchy, random per plot) — you cannot see which tiles are poor until you **own** the parcel; till then fails with a notice until you deposit **1 dirt** per tile (**`I`**).
 
 ### Seasons
-The year cycles through **Spring → Summer → Fall → Winter** (15 minutes each). **Planting wheat** is allowed **only in spring**; you can till soil any time, but `[F]` to plant seeds succeeds only while the HUD says **spring**. **Winter** kills crops still in the field; **wheat** left in **piles** on the ground rots into **compost** — **silos** keep stored wheat safe.
+The year cycles through **Spring → Summer → Fall → Winter** (15 minutes each). **Planting wheat** is allowed **only in spring**; you can till soil any time, but `[F]` to plant seeds succeeds only while the HUD says **spring**. **Winter** kills crops still in the field; **wheat** left in **piles** on the ground rots into **compost** — **silos** keep stored wheat safe. You cannot **[F]** till or plant on a tile until **ground piles** on that tile are cleared (load into your barrow), including compost from rotted wheat.
 
 ### Resource types
 | Resource | Where | NPC price | Notes |
@@ -191,4 +191,4 @@ See `wheelbarrow.service` for the service unit template. Deployment is handled m
 
 ## Version
 
-Current version: **0.9.8** (see `VERSION`, `pyproject.toml`, and cache-bust query on scripts in `client/index.html`). See [CHANGELOG.md](CHANGELOG.md).
+Current version: **0.9.9** (see `VERSION`, `pyproject.toml`, and cache-bust query on scripts in `client/index.html`). See [CHANGELOG.md](CHANGELOG.md).

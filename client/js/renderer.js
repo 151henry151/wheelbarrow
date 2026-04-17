@@ -972,6 +972,80 @@ const Renderer = (() => {
     return `rgb(${r},${g},${b})`;
   }
 
+  /** 0 = paint like new (100), 1 = badly worn — for tub tint + wear overlay. */
+  function _paintDistress(wbPaint) {
+    const p = wbPaint != null ? Number(wbPaint) : 100;
+    if (Number.isNaN(p) || p >= 78) return 0;
+    const t = (78 - p) / 78;
+    return Math.min(1, t * t * 1.15);
+  }
+
+  /** Dingy / sun-faded tub when paint condition is poor. */
+  function _weatherTubColor(baseHex, distress) {
+    if (distress < 0.04 || !baseHex.startsWith('#')) return baseHex;
+    return _shade(baseHex, -48 * distress - 8 * distress * distress);
+  }
+
+  /** Scratches / rust streaks on the bucket (after tub is drawn). */
+  function _wheelbarrowPaintWear(px, py, facing, distress) {
+    if (distress < 0.06) return;
+    const a = 0.1 + 0.55 * distress;
+    ctx.save();
+    ctx.strokeStyle = `rgba(95, 48, 28, ${a})`;
+    ctx.lineWidth = 0.85;
+    ctx.lineCap = 'round';
+    const cx = px + T / 2;
+    const f = facing || 'down';
+    const n = 4 + Math.floor(distress * 5);
+    const seed = (px + py * 17) % 1000;
+    if (f === 'up') {
+      for (let i = 0; i < n; i++) {
+        const j = (seed + i * 31) % 17;
+        ctx.beginPath();
+        ctx.moveTo(px + 9 + (j % 5), py + 9 + (i % 3));
+        ctx.lineTo(px + 14 + (i % 4), py + 16 + ((i + j) % 4));
+        ctx.stroke();
+      }
+      ctx.strokeStyle = `rgba(55, 35, 22, ${a * 0.65})`;
+      ctx.lineWidth = 0.45;
+      ctx.beginPath();
+      ctx.moveTo(px + 11, py + 11);
+      ctx.lineTo(px + T - 13, py + 12);
+      ctx.stroke();
+    } else if (f === 'down') {
+      for (let i = 0; i < n; i++) {
+        const j = (seed + i * 29) % 19;
+        ctx.beginPath();
+        ctx.moveTo(px + 8 + (j % 6), py + 9 + (i % 4));
+        ctx.lineTo(px + 15 + (i % 5), py + 18 + ((i + j) % 3));
+        ctx.stroke();
+      }
+      ctx.strokeStyle = `rgba(55, 35, 22, ${a * 0.65})`;
+      ctx.lineWidth = 0.45;
+      ctx.beginPath();
+      ctx.moveTo(px + 10, py + 10);
+      ctx.lineTo(px + T - 11, py + 11);
+      ctx.stroke();
+    } else {
+      const flip = f === 'right';
+      const off = flip ? (x) => px + T - (x - px) : (x) => x;
+      for (let i = 0; i < n; i++) {
+        const j = (seed + i * 23) % 15;
+        ctx.beginPath();
+        ctx.moveTo(off(px + 18 + (j % 4)), py + 10 + (i % 3));
+        ctx.lineTo(off(px + 24 + (i % 3)), py + 17 + ((i + j) % 4));
+        ctx.stroke();
+      }
+      ctx.strokeStyle = `rgba(55, 35, 22, ${a * 0.65})`;
+      ctx.lineWidth = 0.45;
+      ctx.beginPath();
+      ctx.moveTo(off(px + 19), py + 11);
+      ctx.lineTo(off(px + 27), py + 12);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
   function _label(cx, cy, text, color, font) {
     ctx.font        = font || '8px monospace';
     ctx.textAlign   = 'center';
@@ -987,7 +1061,7 @@ const Renderer = (() => {
     for (const p of (s.players || [])) {
       if (!p || p.id == null || !s.player || p.id === s.player.id) continue;
       const face = s._otherFacing[p.id] || 'down';
-      _wheelbarrow(p.x * T, p.y * T, '#6ab0e8', p.username, p.flat_tire, 0, face, true);
+      _wheelbarrow(p.x * T, p.y * T, '#6ab0e8', p.username, p.flat_tire, 0, face, true, p.wb_paint);
     }
     if (s.player) {
       const bucket = s.player.bucket || {};
@@ -995,7 +1069,7 @@ const Renderer = (() => {
       const cap    = s.player.bucket_cap_effective != null ? s.player.bucket_cap_effective : (s.player.bucket_cap || 10);
       const face   = s.facing || 'down';
       _wheelbarrow(s.player.x * T, s.player.y * T, '#f5c842', s.player.username,
-                   s.player.flat_tire, Math.min(1, total / cap), face, false);
+                   s.player.flat_tire, Math.min(1, total / cap), face, false, s.player.wb_paint);
     }
   }
 
@@ -1233,14 +1307,17 @@ const Renderer = (() => {
     ctx.lineCap = 'butt';
   }
 
-  function _wheelbarrow(px, py, color, label, flatTire, loadFrac, facing, showLabel) {
+  function _wheelbarrow(px, py, color, label, flatTire, loadFrac, facing, showLabel, wbPaint) {
     const cx = px + T / 2;
     loadFrac = loadFrac || 0;
     const f = facing || 'down';
-    if (f === 'up') _wheelbarrowUp(px, py, color, flatTire, loadFrac);
-    else if (f === 'down') _wheelbarrowDown(px, py, color, flatTire, loadFrac);
-    else if (f === 'left') _wheelbarrowSide(px, py, color, flatTire, loadFrac, false);
-    else _wheelbarrowSide(px, py, color, flatTire, loadFrac, true);
+    const distress = _paintDistress(wbPaint);
+    const tubColor = _weatherTubColor(color, distress);
+    if (f === 'up') _wheelbarrowUp(px, py, tubColor, flatTire, loadFrac);
+    else if (f === 'down') _wheelbarrowDown(px, py, tubColor, flatTire, loadFrac);
+    else if (f === 'left') _wheelbarrowSide(px, py, tubColor, flatTire, loadFrac, false);
+    else _wheelbarrowSide(px, py, tubColor, flatTire, loadFrac, true);
+    _wheelbarrowPaintWear(px, py, f, distress);
 
     if (showLabel && label) _label(cx, py + 1, label, '#ffffff', 'bold 9px monospace');
   }

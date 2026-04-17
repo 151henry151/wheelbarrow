@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.9] - 2026-04-17
+
+### Changed
+- **Client** (`client/js/renderer.js`): wheelbarrow tub **tints and wear scratches** scale with low **`wb_paint`** — looks distressed when paint is in poor condition; other players’ `wb_paint` included in tick payload (`server/game/engine.py` **`_connected_players_wire`**)
+
 ## [0.9.8] - 2026-04-17
 
 ### Added
