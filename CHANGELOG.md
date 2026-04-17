@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.1] - 2026-04-16
+
+### Changed
+- **Client** (`client/js/renderer.js`): **Grass** — sample base color and micro-shade from **continuous world XZ** so adjacent tiles do not show faint grid lines at boundaries
+- **Client** (`client/js/renderer.js`): **Water** — full-tile quads with **per-corner rounded-rectangle** fragment clipping (neighbor-aware radii: circular isolated cells, straight shared edges between water tiles, rounded outer corners toward grass); clip runs before `#include <color_fragment>` for reliable compilation
+
 ## [0.12.0] - 2026-04-17
 
 ### Changed

@@ -101,6 +101,22 @@ const Renderer = (() => {
     };
   }
 
+  /** Same palette as {@link _fieldGrassRgb} but sampled in **world XZ** so colors do not jump at tile edges. */
+  function _grassRgbContinuous(worldX, worldZ) {
+    const fx = worldX * 0.0053125;
+    const fy = worldZ * 0.0065625;
+    const n =
+      Math.sin(fx + fy * 0.73) * 0.42 +
+      Math.cos(fx * 0.65 - fy * 0.88) * 0.36 +
+      Math.sin((worldX + worldZ) * 0.00296875) * 0.28;
+    const t = (n + 1.06) / 2.12;
+    return {
+      r: (46 + t * 14) / 255,
+      g: (68 + t * 16) / 255,
+      b: (38 + t * 12) / 255,
+    };
+  }
+
   function _shadeRgb(o, dr, dg, db) {
     _c.setRGB(
       Math.min(1, Math.max(0, o.r + dr / 255)),
@@ -230,8 +246,12 @@ const Renderer = (() => {
     grassMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     groundGroup.add(grassMesh);
 
-    const waterGeo = new THREE.PlaneGeometry(T * 0.96, T * 0.96);
+    const waterGeo = new THREE.PlaneGeometry(T, T);
     waterGeo.rotateX(-Math.PI / 2);
+    waterGeo.setAttribute(
+      'aWaterR',
+      new THREE.InstancedBufferAttribute(new Float32Array(MAX_WATER * 4), 4),
+    );
     waterMat = new THREE.MeshPhongMaterial({
       color: 0x1c5ca0,
       emissive: 0x0a3058,
@@ -239,6 +259,42 @@ const Renderer = (() => {
       opacity: 0.72,
       shininess: 90,
     });
+    waterMat.onBeforeCompile = (shader) => {
+      shader.vertexShader = shader.vertexShader.replace(
+        '#include <common>',
+        `#include <common>
+attribute vec4 aWaterR;
+varying vec4 vWaterR;
+`,
+      );
+      shader.vertexShader = shader.vertexShader.replace(
+        '#include <uv_vertex>',
+        `#include <uv_vertex>
+vWaterR = aWaterR;
+`,
+      );
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <common>',
+        `#include <common>
+varying vec4 vWaterR;
+float sdRoundedBox2D( vec2 p, vec2 b, vec4 r ) {
+  r.xy = (p.x>0.0)?r.xy : r.zw;
+  r.x  = (p.y>0.0)?r.x  : r.y;
+  vec2 q = abs(p)-b+r.x;
+  return min(max(q.x,q.y),0.0) + length(max(q,0.0)) - r.x;
+}
+`,
+      );
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <color_fragment>',
+        `vec2 puvW = (vUv - 0.5) * 2.0;
+vec2 pwbW = vec2(puvW.x, -puvW.y);
+float dWaterClip = sdRoundedBox2D( pwbW, vec2(1.0), vWaterR );
+if ( dWaterClip > 0.001 ) discard;
+#include <color_fragment>
+`,
+      );
+    };
     waterMesh = new THREE.InstancedMesh(waterGeo, waterMat, MAX_WATER);
     waterMesh.receiveShadow = true;
     waterMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -475,12 +531,8 @@ const Renderer = (() => {
         _dummy.scale.set(1, 1, 1);
         _dummy.updateMatrix();
         grassMesh.setMatrixAt(i, _dummy.matrix);
-        const base = _fieldGrassRgb(tx, ty);
-        const cx = x + Math.sin(ty * 0.58 + tx * 0.13) * 2.5;
-        const cz = z + Math.cos(tx * 0.52 + ty * 0.11) * 2.5;
-        const ddx = (cx - x) / T;
-        const ddz = (cz - z) / T;
-        const shade = 1 - 0.12 * (ddx * ddx + ddz * ddz);
+        const base = _grassRgbContinuous(x, z);
+        const shade = 1 - 0.035 * Math.sin(x * 0.031) * Math.sin(z * 0.029);
         const edgeBlend = _smoothstep01(rFade0, rTiles, dist);
         const r = base.r * shade * (1 - edgeBlend) + hzR * edgeBlend;
         const g = base.g * shade * (1 - edgeBlend) + hzG * edgeBlend;
@@ -498,6 +550,10 @@ const Renderer = (() => {
   function _waterAndRoadsInView(sx, sy, ex, ey) {
     let wi = 0;
     let ri = 0;
+    const waterSet = new Set((s.water_tiles || []).map((w) => `${w.x},${w.y}`));
+    const hasW = (x, y) => waterSet.has(`${x},${y}`);
+    const waterRAttr = waterMesh.geometry.getAttribute('aWaterR');
+    const waterRArr = waterRAttr.array;
     const pushW = (tx, ty) => {
       if (wi >= MAX_WATER) return;
       const { x, z } = _worldXZ(tx, ty);
@@ -505,7 +561,23 @@ const Renderer = (() => {
       _dummy.rotation.set(0, 0, 0);
       _dummy.scale.set(1, 1, 1);
       _dummy.updateMatrix();
-      waterMesh.setMatrixAt(wi++, _dummy.matrix);
+      waterMesh.setMatrixAt(wi, _dummy.matrix);
+      const wN = hasW(tx, ty - 1);
+      const wE = hasW(tx + 1, ty);
+      const wS = hasW(tx, ty + 1);
+      const wW = hasW(tx - 1, ty);
+      const iso = !(wN || wE || wS || wW);
+      const Rc = iso ? 0.48 : 0.42;
+      const rSW = (wW && wS) ? 0 : Rc;
+      const rSE = (wE && wS) ? 0 : Rc;
+      const rNE = (wE && wN) ? 0 : Rc;
+      const rNW = (wW && wN) ? 0 : Rc;
+      const o = wi * 4;
+      waterRArr[o] = rSW;
+      waterRArr[o + 1] = rSE;
+      waterRArr[o + 2] = rNE;
+      waterRArr[o + 3] = rNW;
+      wi += 1;
     };
     const pushR = (tx, ty) => {
       if (ri >= MAX_ROAD) return;
@@ -550,6 +622,7 @@ const Renderer = (() => {
     waterMesh.count = wi;
     roadMesh.count = ri;
     waterMesh.instanceMatrix.needsUpdate = true;
+    waterRAttr.needsUpdate = true;
     roadMesh.instanceMatrix.needsUpdate = true;
   }
 
