@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.8] - 2026-04-17
+
+### Added
+- **`scripts/densify_resource_nodes.py`**: run against an existing database to insert extra wild nodes via `densify_nodes_for_existing_world()` (meadow copses + grid + mineral boost on unoccupied tiles; does not duplicate forest-cluster groves)
+
+### Changed
+- **`server/game/world_gen.py`**: commit the density work outlined in 0.9.5 — wider **forest** biome; **`RESOURCE_GRID_STEP`** / **`GRID_CELL_HIT_PROB`**; **`MINERAL_QUAD`** and **`_pick_resource_for_grid`**; **meadow copses** on plains/wetland; stronger **`_boost_mineral_nodes`**; **`densify_nodes_for_existing_world`** helper for migrations
+- **`deploy/README.md`**: document **terrain migrations** (rebuild image, `regenerate_poor_soil`, `densify_resource_nodes`, restart)
+
 ## [0.9.7] - 2026-04-17
 
 ### Changed
@@ -19,11 +28,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.9.5] - 2026-04-16
 
-### Added
-- **`scripts/densify_resource_nodes.py`**: insert extra wild nodes on existing worlds (meadow copses + grid + mineral boost) without overlapping current `resource_nodes`
-
 ### Changed
-- **World generation** (`server/game/world_gen.py`): widen **forest** biome band (~40% of map); denser resource grid (`RESOURCE_GRID_STEP` 10, `GRID_CELL_HIT_PROB` 0.48); more forest groves; **meadow copses** (clustered wood on plains/wetland); **MINERAL_QUAD** sprinkle so every biome often drops stone/gravel/clay/dirt; stronger mineral boost pass with global mineral pick; improves odds that a typical viewport shows several trees and mixed minerals
+- **Design intent** (implementation and migration script committed in **[0.9.8]**): denser wild resources — wider forest biome, meadow copses, mineral grid sprinkle, `densify_resource_nodes` migration for existing worlds
 
 ## [0.9.4] - 2026-04-16
 

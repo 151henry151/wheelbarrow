@@ -28,13 +28,16 @@ def _biome(x: int, y: int) -> str:
     """
     Simple smooth biome from position. Returns one of:
     'forest', 'rocky', 'plains', 'wetland'
+
+    Forest is widened (~40% of the map) so viewports usually include trees;
+    remaining bands are tightened slightly.
     """
     nx, ny = x / 250, y / 250
     v = (math.sin(nx * 2.1) * math.cos(ny * 1.7) +
          math.cos(nx * 1.3 + ny * 0.9) + 2.0) / 4.0
-    if v < 0.25: return "wetland"
-    if v < 0.50: return "plains"
-    if v < 0.75: return "forest"
+    if v < 0.20: return "wetland"
+    if v < 0.40: return "plains"
+    if v < 0.80: return "forest"
     return "rocky"
 
 
@@ -49,14 +52,37 @@ BIOME_RESOURCES = {
     "wetland": [("clay",   100,  0.05), ("topsoil", 60, 0.15)],
 }
 
+# Sprinkled often enough that plains/wetland viewports still see stone/gravel/clay/dirt.
+MINERAL_QUAD = [
+    ("stone", 120, 0.02),
+    ("gravel", 100, 0.03),
+    ("clay", 100, 0.05),
+    ("dirt", 60, 0.07),
+]
+
 # Wild trees (forest clusters) — more abundant than the old scattered forest wood nodes.
 # Wood target ~6× prior cluster count; non-wood grid uses RESOURCE_GRID_STEP for ~3× density.
 FOREST_WOOD_MAX = 118
 FOREST_WOOD_REPLENISH = 0.085
-FOREST_CLUSTER_TARGET = 552  # ~6× 92 — grove centers to place
-FOREST_CLUSTER_MIN_SPACING = 10  # slightly tighter so more groves fit in forest biome
+FOREST_CLUSTER_TARGET = 880
+FOREST_CLUSTER_MIN_SPACING = 8
 MIN_TREES_PER_FOREST_CLUSTER = 3  # never commit a lone tree — smallest grove is 3 trees
-RESOURCE_GRID_STEP = 14  # ~3× nodes vs step 25 (same hit chance per cell)
+# Denser grid + higher hit rate → typical screen has several nodes including minerals.
+RESOURCE_GRID_STEP = 10
+GRID_CELL_HIT_PROB = 0.48
+# Small wood stands in plains/wetland (meadow copses) — viewports away from forest still have trees.
+MEADOW_COPSE_TARGET = 200
+MEADOW_COPSE_MIN_SPACING = 11
+
+
+def _pick_resource_for_grid(rng: random.Random, biome: str) -> tuple:
+    """
+    Mostly biome-typical resources, but often enough any biome drops the four base minerals
+    so a random window can show stone/gravel/clay/dirt without crossing the whole map.
+    """
+    if rng.random() < 0.30:
+        return rng.choice(MINERAL_QUAD)
+    return rng.choice(BIOME_RESOURCES[biome])
 
 # ---- Town placement ---------------------------------------------------------
 
@@ -246,6 +272,80 @@ def _add_forest_clusters(
             cluster_centers.append((cx, cy))
 
 
+def _add_meadow_copses(
+    rng: random.Random,
+    nodes: list[dict],
+    occupied: set[tuple[int, int]],
+    sx: int,
+    sy: int,
+    near_spawn,
+) -> None:
+    """
+    Wood groves on plains and wetland (not forest — those use _add_forest_clusters).
+    Keeps clustered trees; avoids lone stumps via MIN_TREES_PER_FOREST_CLUSTER.
+    """
+    cluster_centers: list[tuple[int, int]] = []
+    attempts = 0
+    max_attempts = 320000
+    while len(cluster_centers) < MEADOW_COPSE_TARGET and attempts < max_attempts:
+        attempts += 1
+        cx = rng.randint(30, WORLD_W - 30)
+        cy = rng.randint(30, WORLD_H - 30)
+        if near_spawn(cx, cy):
+            continue
+        b = _biome(cx, cy)
+        if b not in ("plains", "wetland"):
+            continue
+        if any(
+            math.hypot(cx - ox, cy - oy) < MEADOW_COPSE_MIN_SPACING
+            for ox, oy in cluster_centers
+        ):
+            continue
+
+        kind = rng.randint(0, 1)
+        radius = rng.randint(4, 7)
+        n_trees = rng.randint(5, 11)
+        batch: list[dict] = []
+        placed = 0
+        t_attempts = 0
+        while placed < n_trees and t_attempts < n_trees * 35:
+            t_attempts += 1
+            dx = rng.randint(-radius, radius)
+            dy = rng.randint(-radius, radius)
+            if dx * dx + dy * dy > radius * radius:
+                continue
+            tx, ty = cx + dx, cy + dy
+            if tx < 8 or tx >= WORLD_W - 8 or ty < 8 or ty >= WORLD_H - 8:
+                continue
+            if near_spawn(tx, ty):
+                continue
+            if _biome(tx, ty) not in ("plains", "wetland"):
+                continue
+            if (tx, ty) in occupied:
+                continue
+            variant = kind * 8 + rng.randint(0, 7)
+            dist = math.hypot(tx - sx, ty - sy)
+            freshness = max(0.42, 1.0 - dist / (WORLD_W * 0.52))
+            max_a = FOREST_WOOD_MAX * rng.uniform(0.92, 1.08)
+            rate = FOREST_WOOD_REPLENISH * rng.uniform(0.9, 1.1)
+            batch.append({
+                "x": tx,
+                "y": ty,
+                "node_type": "wood",
+                "current_amount": round(max_a * rng.uniform(0.58, 0.92) * freshness, 1),
+                "max_amount": round(max_a, 1),
+                "replenish_rate": rate,
+                "tree_variant": variant,
+            })
+            placed += 1
+
+        if len(batch) >= MIN_TREES_PER_FOREST_CLUSTER:
+            for n in batch:
+                occupied.add((n["x"], n["y"]))
+                nodes.append(n)
+            cluster_centers.append((cx, cy))
+
+
 def _generate_nodes(rng: random.Random) -> list[dict]:
     """
     Scatter ~1500+ resource nodes across the world by biome (dense grid), plus clustered forest wood.
@@ -297,11 +397,12 @@ def _generate_nodes(rng: random.Random) -> list[dict]:
         return abs(x - sx) <= 35 and abs(y - sy) <= 35
 
     _add_forest_clusters(rng, nodes, occupied, sx, sy, near_spawn)
+    _add_meadow_copses(rng, nodes, occupied, sx, sy, near_spawn)
 
-    # Grid scatter: ~3× denser than legacy (step 25 → RESOURCE_GRID_STEP), 35% chance per cell
+    # Grid scatter: dense step + hit probability; minerals often from MINERAL_QUAD (see _pick_resource_for_grid)
     for gx in range(0, WORLD_W, RESOURCE_GRID_STEP):
         for gy in range(0, WORLD_H, RESOURCE_GRID_STEP):
-            if rng.random() > 0.35:
+            if rng.random() > GRID_CELL_HIT_PROB:
                 continue
             x = gx + rng.randint(0, RESOURCE_GRID_STEP - 1)
             y = gy + rng.randint(0, RESOURCE_GRID_STEP - 1)
@@ -312,9 +413,8 @@ def _generate_nodes(rng: random.Random) -> list[dict]:
             if (x, y) in occupied:
                 continue
 
-            biome   = _biome(x, y)
-            options = BIOME_RESOURCES[biome]
-            rtype, max_a, rate = rng.choice(options)
+            biome = _biome(x, y)
+            rtype, max_a, rate = _pick_resource_for_grid(rng, biome)
 
             # Farther from spawn → lower current amount (depleted over time)
             dist      = math.hypot(x - sx, y - sy)
@@ -341,12 +441,12 @@ def _boost_mineral_nodes(
     sy: int,
     near_spawn,
 ) -> None:
-    """Add ~1.5× more stone/gravel/clay/dirt nodes on top of the grid pass (~2.5× total vs grid-only)."""
+    """Extra stone/gravel/clay/dirt; often uses MINERAL_QUAD so every biome gets base minerals."""
     count = sum(1 for n in nodes if n["node_type"] in MINERAL_NODE_TYPES)
-    extra = int(count * 1.5)
+    extra = int(count * 2.1)
     placed = 0
     attempts = 0
-    while placed < extra and attempts < max(extra * 50, 5000):
+    while placed < extra and attempts < max(extra * 50, 8000):
         attempts += 1
         x = rng.randint(8, WORLD_W - 9)
         y = rng.randint(8, WORLD_H - 9)
@@ -356,8 +456,10 @@ def _boost_mineral_nodes(
             continue
         biome = _biome(x, y)
         opts = [o for o in BIOME_RESOURCES[biome] if o[0] in MINERAL_NODE_TYPES]
+        if rng.random() < 0.55 or len(opts) < 2:
+            opts = MINERAL_QUAD
         if not opts:
-            continue
+            opts = MINERAL_QUAD
         rtype, max_a, rate = rng.choice(opts)
         dist = math.hypot(x - sx, y - sy)
         freshness = max(0.3, 1.0 - dist / (WORLD_W * 0.6))
@@ -457,6 +559,51 @@ def _generate_parcels(rng: random.Random, towns: list[dict],
             wplaced += 1
 
     return parcels
+
+
+def densify_nodes_for_existing_world(
+    rng: random.Random,
+    occupied: set[tuple[int, int]],
+) -> list[dict]:
+    """
+    Add wild nodes on top of an existing world (migration): meadow copses + grid + mineral boost
+    on tiles not in ``occupied``. Does not add forest-cluster groves (avoids doubling forest density).
+    Caller inserts rows with queries.insert_nodes_bulk.
+    """
+    sx, sy = PLAYER_SPAWN
+
+    def near_spawn(x, y):
+        return abs(x - sx) <= 35 and abs(y - sy) <= 35
+
+    occ = set(occupied)
+    nodes: list[dict] = []
+    _add_meadow_copses(rng, nodes, occ, sx, sy, near_spawn)
+    for gx in range(0, WORLD_W, RESOURCE_GRID_STEP):
+        for gy in range(0, WORLD_H, RESOURCE_GRID_STEP):
+            if rng.random() > GRID_CELL_HIT_PROB:
+                continue
+            x = gx + rng.randint(0, RESOURCE_GRID_STEP - 1)
+            y = gy + rng.randint(0, RESOURCE_GRID_STEP - 1)
+            x = max(5, min(WORLD_W - 5, x))
+            y = max(5, min(WORLD_H - 5, y))
+            if near_spawn(x, y):
+                continue
+            if (x, y) in occ:
+                continue
+            biome = _biome(x, y)
+            rtype, max_a, rate = _pick_resource_for_grid(rng, biome)
+            dist = math.hypot(x - sx, y - sy)
+            freshness = max(0.3, 1.0 - dist / (WORLD_W * 0.6))
+            occ.add((x, y))
+            nodes.append({
+                "x": x, "y": y, "node_type": rtype,
+                "current_amount": round(max_a * 0.5 * freshness, 1),
+                "max_amount": max_a, "replenish_rate": rate,
+                "tree_variant": 0,
+            })
+    _boost_mineral_nodes(rng, nodes, occ, sx, sy, near_spawn)
+    return nodes
+
 
 # ---- Main entry point -------------------------------------------------------
 

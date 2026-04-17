@@ -80,12 +80,19 @@ After pulling a release that changes **water** or **poor-soil** logic:
    docker compose run --rm app python scripts/regenerate_poor_soil.py
    ```
 
-3. **Restart** the service so the game process reloads terrain from the database:
+3. **Resource nodes** (add wild nodes on top of an existing world — run when world gen density was increased; safe to skip on fresh installs):
+   ```bash
+   docker compose run --rm app python scripts/densify_resource_nodes.py
+   ```
+
+4. **Restart** the service so the game process reloads terrain from the database:
    ```bash
    sudo systemctl restart wheelbarrow
    ```
 
 **Water:** If `water_tiles` was empty (e.g. older bug), a normal restart after upgrading the server code seeds ponds/streams automatically. If you already have water and only changed unrelated code, skip re-seeding.
+
+Run steps 2–3 only when the release notes require them; always end with **step 4** (restart).
 
 ## Resetting the database (destroys all data)
 
