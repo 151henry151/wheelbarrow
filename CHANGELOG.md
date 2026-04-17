@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.4] - 2026-04-17
+
+### Changed
+- **Client** (`client/js/renderer.js`): **Sky / horizon** — `scene.background` uses **blue–gray seasonal sky** colors (not grass green); **fog** color matches sky so distance reads as atmosphere; slightly lower fog density
+- **Client** (`client/js/renderer.js`): **Parcel overlays** (fill, edge lines, labels) render only when the player is **on** that parcel or **previewing** it with **[B]** — no outlines for distant parcels
+
 ## [0.10.3] - 2026-04-17
 
 ### Changed

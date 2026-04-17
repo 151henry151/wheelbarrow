@@ -49,7 +49,7 @@ Inspired by the spirit of [A Tractor](https://store.steampowered.com/app/779050/
 ### The economy ladder
 1. **Spawn** — explore outwards to find resources; the starting field is intentionally bare
 2. **Sell** at the NPC primary market (about 60 tiles south of spawn); prices drift based on supply
-3. **Buy land** — parcels are variable size and price; press B once to preview the outline and price, B again to buy
+3. **Buy land** — parcels are variable size and price; press B once to preview the outline and price, B again to buy (parcel outlines on the 3D map only show **on the parcel you’re standing on**, or while **previewing** with B)
 4. **Pile resources** on your land (`U`), set a sell price (`E`), and let other players buy from you — no market building required
 5. **Build structures** — pay the **starting coin** cost to place a **construction site**, then carry **foundation** and **building** materials to the tile and press **`G`** to deliver each load until the building completes (horse stable, gravel pit, compost heap, topsoil mound, **player market**, **town hall**, **grain silo**). Use **`X`** to cancel a site and recover deposited materials (coins spent to start are not refunded).
 6. **Build a Player Market** — **2000c** to start the site, then staged stone/wood delivery — set custom buy and sell prices for any goods; the most powerful economic tool in the game
@@ -121,7 +121,7 @@ The year cycles through **Spring → Summer → Fall → Winter** (15 minutes ea
 | Backend | Python 3.11, FastAPI, WebSockets |
 | Game loop | asyncio server-side tick |
 | Database | MariaDB |
-| Frontend | HTML5 Canvas + Three.js (WebGL), vanilla JavaScript |
+| Frontend | HTML5 Canvas + Three.js (WebGL), vanilla JavaScript — **sky/horizon** via scene background + fog (seasonal tints), not the grass color |
 | Server | Debian 12, nginx reverse proxy |
 | Domain | [hromp.com/wheelbarrow/](https://hromp.com/wheelbarrow/) |
 
@@ -195,4 +195,4 @@ See `wheelbarrow.service` for the service unit template. Deployment is handled m
 
 ## Version
 
-Current version: **0.10.3** (see `VERSION`, `pyproject.toml`, and cache-bust query on scripts in `client/index.html`). See [CHANGELOG.md](CHANGELOG.md).
+Current version: **0.10.4** (see `VERSION`, `pyproject.toml`, and cache-bust query on scripts in `client/index.html`). See [CHANGELOG.md](CHANGELOG.md).

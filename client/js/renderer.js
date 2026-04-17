@@ -6,17 +6,19 @@
 const Renderer = (() => {
   const T = 32;
 
-  const SEASON_BG = {
-    spring: 0x2a3d28,
-    summer: 0x354830,
-    fall:   0x3d3528,
-    winter: 0x283038,
+  /** Clear-color / upper sky (distinct from grass so tilt reads as sky vs ground). */
+  const SEASON_SKY = {
+    spring: 0x8ec0e8,
+    summer: 0x7ab8ec,
+    fall:   0xc8b898,
+    winter: 0xa8b8c8,
   };
+  /** Fog tints distant terrain toward horizon — keep close to sky for a natural horizon line. */
   const SEASON_FOG = {
-    spring: 0x1e2a1c,
-    summer: 0x243220,
-    fall:   0x2a2418,
-    winter: 0x1c2428,
+    spring: 0x7aa8c0,
+    summer: 0x6a98b8,
+    fall:   0xa89878,
+    winter: 0x8898a8,
   };
   const TOWN_HEX = [
     0x6a8aff, 0x6affa0, 0xffa06a, 0xff6a9a, 0xa06aff,
@@ -104,10 +106,10 @@ const Renderer = (() => {
 
   function _applySeasonAtmosphere() {
     const name = _seasonName();
-    const bg = SEASON_BG[name] ?? SEASON_BG.spring;
+    const sky = SEASON_SKY[name] ?? SEASON_SKY.spring;
     const fg = SEASON_FOG[name] ?? SEASON_FOG.spring;
-    scene.background = new THREE.Color(bg);
-    scene.fog = new THREE.FogExp2(fg, 0.00045);
+    scene.background = new THREE.Color(sky);
+    scene.fog = new THREE.FogExp2(fg, 0.00038);
     if (hemi && amb) {
       if (name === 'summer') {
         hemi.intensity = 0.55;
@@ -450,6 +452,10 @@ const Renderer = (() => {
     const py = s.player ? s.player.y : 0;
     for (const p of s.world_parcels || []) {
       if (p.x + p.w < sx - 2 || p.x > ex + 2 || p.y + p.h < sy - 2 || p.y > ey + 2) continue;
+      const onThisParcel = px >= p.x && px < p.x + p.w && py >= p.y && py < p.y + p.h;
+      const previewThis = s.parcelPreview === p.id;
+      if (!onThisParcel && !previewThis) continue;
+
       const ox = p.x * T;
       const oy = p.y * T;
       const pw = p.w * T;
