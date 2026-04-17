@@ -113,7 +113,7 @@ const state = {
 
   sellAutopilotActive: false,
   sellAutopilotPile:   null,   // { x, y, resource_type } while running
-  /** Set each frame: orbit yaw follows wheelbarrow while throttling or autopilot */
+  /** Set each frame: orbit yaw locked behind barrow while any move/turn key or autopilot */
   cameraFollowDriving: false,
   _tickWaiters:        [],
   _soldWaiter:         null,
@@ -1247,7 +1247,10 @@ window.addEventListener('load', () => {
         state.player
         && (
           state.sellAutopilotActive
-          || (typeof Input.isDrivingThrottle === 'function' && Input.isDrivingThrottle())
+          || (
+            typeof Input.isWheelbarrowControlActive === 'function'
+            && Input.isWheelbarrowControlActive()
+          )
         )
       );
       Renderer.draw();

@@ -17,9 +17,9 @@ const Terrain = (() => {
     );
   }
 
-  /** Visual height in world units (Three.js Y). */
+  /** Visual height in world units (Three.js Y). Stronger than server elevation_raw scale for readability. */
   function worldY(tx, ty) {
-    return 2 + elevationRaw(tx, ty) * 8;
+    return 2 + elevationRaw(tx, ty) * 12;
   }
 
   /**

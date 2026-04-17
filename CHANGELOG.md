@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.5] - 2026-04-17
+
+### Added
+- **Script** (`scripts/seed_spawn_ring_water.py`): optional **spawn-ring ponds** for existing worlds (INSERT IGNORE; idempotent)
+
+### Changed
+- **Server** (`server/game/terrain_features.py`): reduce **spawn dry zone** for wild water from **42** to **30** tiles (Chebyshev); add **`extra_ponds_outside_spawn_ring()`** for migration; **town at `PLAYER_SPAWN`** no longer applies the full **92**-tile water exclusion (only a **22**-tile core + NPC pads), so ponds/streams can exist near the starting hub
+- **Server** (`server/game/engine.py`): one-time **water + poor-soil** seed when `water_tiles` is empty if **towns** exist (no longer gated on `world_gen_state.done` alone)
+- **Client** (`client/js/renderer.js`): **omit grass** on **water** tiles so ponds/streams read clearly
+- **Client** (`client/js/terrain.js`) / **Server** (`server/game/terrain_elevation.py`): stronger **rolling hill** visual (**×12** vs ×8 world units; slope math unchanged)
+
+## [0.11.4] - 2026-04-17
+
+### Changed
+- **Client** (`client/js/input.js`, `client/js/game.js`, `client/js/renderer.js`): **Behind-barrow camera** while **any** arrow key is held (forward, back, or turn) or **sell autopilot** is active; **mouse yaw** only when **fully stationary** (no arrows); slightly faster yaw snap when re-locking behind the barrow
+
 ## [0.11.3] - 2026-04-17
 
 ### Fixed

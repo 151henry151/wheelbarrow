@@ -221,7 +221,9 @@ class GameEngine:
             self.crops[(crop["x"], crop["y"])] = dict(crop)
 
         await queries.ensure_terrain_tables()
-        if await queries.count_water_tiles() == 0 and await queries.world_is_generated():
+        # Seed if DB has no water but world content exists. Do not require world_gen_state.done —
+        # some DBs had towns/nodes without the flag set, and would never get water otherwise.
+        if await queries.count_water_tiles() == 0 and self.towns:
             from server.game.terrain_features import generate_water_features, generate_poor_soil_for_parcels
 
             rng = random.Random(991)

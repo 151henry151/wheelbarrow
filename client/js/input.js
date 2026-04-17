@@ -54,10 +54,18 @@ const Input = (() => {
     for (const k of Object.keys(held)) delete held[k];
   }
 
-  /** True while ArrowUp/ArrowDown held — camera can follow wheelbarrow heading. */
-  function isDrivingThrottle() {
-    return !!(held.ArrowUp || held.ArrowDown);
+  /**
+   * True while any movement/turn arrow is held — camera locks behind the wheelbarrow.
+   * When all released, the player can orbit yaw with the mouse until they drive again.
+   */
+  function isWheelbarrowControlActive() {
+    return !!(
+      held.ArrowUp
+      || held.ArrowDown
+      || held.ArrowLeft
+      || held.ArrowRight
+    );
   }
 
-  return { init, update, setAutopilotBlocked, clearHeldKeys, isDrivingThrottle };
+  return { init, update, setAutopilotBlocked, clearHeldKeys, isWheelbarrowControlActive };
 })();

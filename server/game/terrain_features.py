@@ -15,13 +15,22 @@ from server.game.constants import PLAYER_SPAWN, WORLD_H, WORLD_W
 WATER_EXCLUSION_RADIUS_FROM_TOWN_CENTER = 92
 # Chebyshev padding around each NPC shop tile from npc_district
 WATER_EXCLUSION_PADDING_AROUND_NPC = 10
+# No wild water inside this Chebyshev distance of PLAYER_SPAWN (smaller = water appears sooner when exploring).
+SPAWN_WATER_EXCLUSION = 30
+# Town whose center is PLAYER_SPAWN would otherwise exclude a huge disk (92 tiles) and block all nearby rivers/ponds.
+SPAWN_TOWN_WATER_CORE_RADIUS = 22
 
 
 def _too_close_to_town_core_or_shops(x: int, y: int, towns: list[dict]) -> bool:
     """True if water should not appear here (near a town center or NPC site)."""
+    sx, sy = PLAYER_SPAWN
     for t in towns:
         cx, cy = int(t["center_x"]), int(t["center_y"])
-        if math.hypot(x - cx, y - cy) < WATER_EXCLUSION_RADIUS_FROM_TOWN_CENTER:
+        dist = math.hypot(x - cx, y - cy)
+        if cx == sx and cy == sy:
+            if dist < SPAWN_TOWN_WATER_CORE_RADIUS:
+                return True
+        elif dist < WATER_EXCLUSION_RADIUS_FROM_TOWN_CENTER:
             return True
         d = t.get("npc_district")
         if not d or not isinstance(d, dict):
@@ -49,7 +58,7 @@ def generate_water_features(
     def ok_tile(tx: int, ty: int) -> bool:
         if not (8 <= tx < WORLD_W - 8 and 8 <= ty < WORLD_H - 8):
             return False
-        if abs(tx - sx) <= 42 and abs(ty - sy) <= 42:
+        if abs(tx - sx) <= SPAWN_WATER_EXCLUSION and abs(ty - sy) <= SPAWN_WATER_EXCLUSION:
             return False
         if (tx, ty) in node_positions:
             return False
@@ -97,6 +106,48 @@ def generate_water_features(
             y = max(10, min(WORLD_H - 11, y + dy + rng.randint(-1, 1)))
 
     return water
+
+
+def extra_ponds_outside_spawn_ring(
+    rng: random.Random,
+    existing: set[tuple[int, int]],
+    node_positions: set[tuple[int, int]],
+    towns: list[dict],
+) -> set[tuple[int, int]]:
+    """
+    Extra small ponds in an annulus just outside the spawn dry zone.
+    For one-time migration on older worlds that had a larger exclusion — adds visible water
+    without replacing existing water/bridges.
+    """
+    sx, sy = PLAYER_SPAWN
+    added: set[tuple[int, int]] = set()
+
+    def ok_tile(tx: int, ty: int) -> bool:
+        if not (8 <= tx < WORLD_W - 8 and 8 <= ty < WORLD_H - 8):
+            return False
+        if abs(tx - sx) <= SPAWN_WATER_EXCLUSION and abs(ty - sy) <= SPAWN_WATER_EXCLUSION:
+            return False
+        if (tx, ty) in node_positions:
+            return False
+        if (tx, ty) in existing or (tx, ty) in added:
+            return False
+        if _too_close_to_town_core_or_shops(tx, ty, towns):
+            return False
+        return True
+
+    for _ in range(36):
+        ang = rng.random() * 2 * math.pi
+        dist = rng.uniform(SPAWN_WATER_EXCLUSION + 6, SPAWN_WATER_EXCLUSION + 55)
+        cx = int(sx + math.cos(ang) * dist)
+        cy = int(sy + math.sin(ang) * dist)
+        rad = rng.randint(2, 4)
+        for dx in range(-rad - 1, rad + 2):
+            for dy in range(-rad - 1, rad + 2):
+                if dx * dx + dy * dy <= rad * rad + rng.randint(0, 2):
+                    tx, ty = cx + dx, cy + dy
+                    if ok_tile(tx, ty):
+                        added.add((tx, ty))
+    return added
 
 
 def generate_poor_soil_for_parcels(

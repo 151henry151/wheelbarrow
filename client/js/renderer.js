@@ -250,7 +250,7 @@ const Renderer = (() => {
       const dy = e.clientY - _lastPtrY;
       _lastPtrX = e.clientX;
       _lastPtrY = e.clientY;
-      // Yaw orbit only while not driving (forward/back); pitch always user-controlled
+      // Yaw orbit only while stationary (no arrow keys / autopilot); pitch always user-controlled
       if (!s.cameraFollowDriving) {
         _camYaw += dx * 0.0045;
       }
@@ -306,7 +306,8 @@ const Renderer = (() => {
     ) {
       // Behind wheelbarrow: horizontal offset aligns with −(cos θ, sin θ) in XZ → yaw = atan2(-cos θ, -sin θ)
       const targetYaw = Math.atan2(-Math.cos(s.player.angle), -Math.sin(s.player.angle));
-      _camYaw = _lerpAngleRad(_camYaw, targetYaw, 0.22);
+      // Slightly snappier return when re-engaging control so “behind barrow” reads clearly
+      _camYaw = _lerpAngleRad(_camYaw, targetYaw, 0.32);
     }
     const cp = Math.cos(_camPitch);
     const sp = Math.sin(_camPitch);
@@ -422,9 +423,11 @@ const Renderer = (() => {
     let i = 0;
     const wx = s.world ? s.world.w : 1000;
     const wy = s.world ? s.world.h : 1000;
+    const waterKey = new Set((s.water_tiles || []).map((w) => `${w.x},${w.y}`));
     for (let ty = sy; ty <= ey && i < MAX_GRASS; ty++) {
       for (let tx = sx; tx <= ex && i < MAX_GRASS; tx++) {
         if (tx < 0 || ty < 0 || tx >= wx || ty >= wy) continue;
+        if (waterKey.has(`${tx},${ty}`)) continue;
         const { x, z } = _worldXZ(tx, ty);
         _dummy.position.set(x, _groundY(tx, ty), z);
         _dummy.rotation.set(0, 0, 0);

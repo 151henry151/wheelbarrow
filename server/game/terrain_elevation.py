@@ -21,4 +21,4 @@ def elevation_raw(tx: int, ty: int) -> float:
 
 def world_y_units(tx: int, ty: int) -> float:
     """Nominal vertical offset in client world units (matches Terrain.worldY)."""
-    return 2.0 + elevation_raw(tx, ty) * 8.0
+    return 2.0 + elevation_raw(tx, ty) * 12.0
