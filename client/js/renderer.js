@@ -44,11 +44,18 @@ const Renderer = (() => {
   let dynamicRoot;
   let overlayRoot;
 
+  /** Orbit pitch (rad): 0 = horizon ring around target, π/2 = straight above. */
+  const PITCH_MIN = 0.06;
+  const PITCH_MAX = 1.52;
+  const DIST_MIN = 180;
+  const DIST_MAX = 720;
+
   let _camYaw = 0.55;
-  let _camPitch = 0.92;
+  let _camPitch = 0.88;
   let _camDist = 380;
   let _dragging = false;
   let _lastPtrX = 0;
+  let _lastPtrY = 0;
 
   let _camX = 0;
   let _camY = 0;
@@ -216,18 +223,29 @@ const Renderer = (() => {
       if (e.button === 0) {
         _dragging = true;
         _lastPtrX = e.clientX;
+        _lastPtrY = e.clientY;
       }
     });
     window.addEventListener('mouseup', () => { _dragging = false; });
     window.addEventListener('mousemove', (e) => {
       if (!_dragging) return;
       const dx = e.clientX - _lastPtrX;
+      const dy = e.clientY - _lastPtrY;
       _lastPtrX = e.clientX;
+      _lastPtrY = e.clientY;
       _camYaw += dx * 0.0045;
+      // Drag up → more top-down; drag down → flatter toward horizon
+      _camPitch -= dy * 0.0045;
+      _camPitch = Math.max(PITCH_MIN, Math.min(PITCH_MAX, _camPitch));
     });
+    canvas.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      const step = e.deltaY > 0 ? 28 : -28;
+      _camDist = Math.max(DIST_MIN, Math.min(DIST_MAX, _camDist + step));
+    }, { passive: false });
     window.addEventListener('keydown', (e) => {
-      if (e.key === '[') _camPitch = Math.min(1.35, _camPitch + 0.04);
-      if (e.key === ']') _camPitch = Math.max(0.45, _camPitch - 0.04);
+      if (e.key === '[') _camPitch = Math.min(PITCH_MAX, _camPitch + 0.05);
+      if (e.key === ']') _camPitch = Math.max(PITCH_MIN, _camPitch - 0.05);
     });
   }
 

@@ -38,9 +38,10 @@ Inspired by the spirit of [A Tractor](https://store.steampowered.com/app/779050/
 | O | Withdraw **wheat** from your **silo** into the barrow |
 | E | Context interact — town hall / NPC shop / **pile menu** (set prices, buy, or **Sell all at NPC market** autopilot on your piles) / trade at player market |
 | F | Farm action — plant wheat (spring only) / fertilize / harvest / till (not in winter — ground frozen) |
-| Drag | Orbit camera (left mouse) |
-| [ | More overhead camera angle |
-| ] | More horizon camera angle |
+| Drag | Orbit: **horizontal** spin + **vertical** tilt (hold left mouse — up/down looks more top-down or flatter) |
+| Mouse wheel | Zoom camera in / out |
+| [ | Nudge view more overhead (toward top-down) |
+| ] | Nudge view flatter (more horizon) |
 | H | Toggle HUD (hidden by default — just press H to see it) |
 | 1–9 | Select item in any open menu |
 | Esc | Cancel parcel preview / close menu |
@@ -194,4 +195,4 @@ See `wheelbarrow.service` for the service unit template. Deployment is handled m
 
 ## Version
 
-Current version: **0.10.2** (see `VERSION`, `pyproject.toml`, and cache-bust query on scripts in `client/index.html`). See [CHANGELOG.md](CHANGELOG.md).
+Current version: **0.10.3** (see `VERSION`, `pyproject.toml`, and cache-bust query on scripts in `client/index.html`). See [CHANGELOG.md](CHANGELOG.md).

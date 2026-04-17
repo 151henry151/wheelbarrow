@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.3] - 2026-04-17
+
+### Changed
+- **Client** (`client/js/renderer.js`): **camera pitch** — drag **up/down** while orbiting to tilt between **near top-down** and **flat**; widen pitch limits; **mouse wheel** zoom; **[** / **]** nudge pitch with new range
+
 ## [0.10.2] - 2026-04-17
 
 ### Fixed
