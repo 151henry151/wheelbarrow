@@ -55,8 +55,9 @@ const Renderer = (() => {
   let _vpW = 0;
   let _vpH = 0;
 
-  const _dummy = new THREE.Object3D();
-  const _c = new THREE.Color();
+  /** Created in init() so this file never touches THREE before three.min.js runs. */
+  let _dummy;
+  let _c;
   const nodePool = [];
   let nodePoolUsed = 0;
   const pilePool = [];
@@ -118,6 +119,12 @@ const Renderer = (() => {
   function init(c, st) {
     canvas = c;
     s = st;
+    if (typeof THREE === 'undefined') {
+      console.error('Wheelbarrow: THREE is not loaded (check vendor/three.min.js).');
+      return;
+    }
+    _dummy = new THREE.Object3D();
+    _c = new THREE.Color();
     scene = new THREE.Scene();
     _applySeasonAtmosphere();
 
@@ -130,10 +137,16 @@ const Renderer = (() => {
       alpha: false,
       powerPreference: 'high-performance',
     });
+    if (!renderer.getContext()) {
+      console.error('Wheelbarrow: WebGL context creation failed.');
+      return;
+    }
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    if (THREE.SRGBColorSpace !== undefined) {
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
+    }
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.05;
 
@@ -158,7 +171,8 @@ const Renderer = (() => {
 
     const grassGeo = new THREE.PlaneGeometry(T, T);
     grassGeo.rotateX(-Math.PI / 2);
-    grassMat = new THREE.MeshLambertMaterial({ vertexColors: true });
+    // Per-tile colors use InstancedMesh instanceColor — do not set vertexColors: true (breaks instance tint).
+    grassMat = new THREE.MeshLambertMaterial();
     grassMesh = new THREE.InstancedMesh(grassGeo, grassMat, MAX_GRASS);
     grassMesh.receiveShadow = true;
     grassMesh.castShadow = false;
@@ -219,6 +233,7 @@ const Renderer = (() => {
     canvas.height = window.innerHeight;
     const W = canvas.width;
     const H = canvas.height;
+    if (!camera || !renderer) return;
     camera.aspect = W / H;
     camera.updateProjectionMatrix();
     renderer.setSize(W, H, false);
@@ -948,13 +963,17 @@ const Renderer = (() => {
 
   function draw() {
     if (!s.player || typeof THREE === 'undefined') return;
-    const W = canvas.width;
-    const H = canvas.height;
+    if (!renderer || !scene || !camera) return;
+    if (!_dummy || !_c) return;
+    const W = Math.max(1, canvas.width | 0);
+    const H = Math.max(1, canvas.height | 0);
+    if (!Number.isFinite(s.player.x) || !Number.isFinite(s.player.y)) return;
     _vpW = W;
     _vpH = H;
     _camX = s.player.x * T - W / 2 + T / 2;
     _camY = s.player.y * T - H / 2 + T / 2;
 
+    try {
     _applySeasonAtmosphere();
     const sunX = s.player.x * T + T / 2;
     const sunZ = s.player.y * T + T / 2;
@@ -1000,6 +1019,9 @@ const Renderer = (() => {
 
     _updateCamera(s.player.x, s.player.y);
     renderer.render(scene, camera);
+    } catch (err) {
+      console.error('Wheelbarrow renderer.draw:', err);
+    }
   }
 
   return { init, draw };

@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-04-16
+
+### Fixed
+- **Client** (`client/js/renderer.js`): **WebGL draw** no longer fails silently — remove **`vertexColors: true`** from grass `InstancedMesh` material (conflicts with **`setColorAt`** instance colors), defer **`THREE`** helpers to **`init()`**, guard **`resize`/`draw`**, wrap **`draw`** in **try/catch**, optional **`SRGBColorSpace`** when present
+
 ## [0.10.0] - 2026-04-16
 
 ### Added
