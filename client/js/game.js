@@ -575,7 +575,11 @@ function _updateHint() {
         hints.push('Poor soil — load dirt, then [I] here before you can till or plant');
       }
     } else if (_soilTilledAt(px, py) === 1) {
-      hints.push('[F] plant wheat (tilled soil)');
+      if (state.season && state.season.name === 'spring') {
+        hints.push('[F] plant wheat (tilled soil)');
+      } else {
+        hints.push('Tilled — planting wheat is only allowed in spring');
+      }
     } else {
       hints.push('[F] till soil before planting');
     }

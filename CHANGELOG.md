@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.6] - 2026-04-16
+
+### Changed
+- **Farming**: allow **planting wheat** only during **spring** — server rejects `[F]` plant otherwise; HUD hints on tilled soil reflect spring-only planting; update README till/plant copy
+
+## [0.9.5] - 2026-04-16
+
+### Added
+- **`scripts/densify_resource_nodes.py`**: insert extra wild nodes on existing worlds (meadow copses + grid + mineral boost) without overlapping current `resource_nodes`
+
+### Changed
+- **World generation** (`server/game/world_gen.py`): widen **forest** biome band (~40% of map); denser resource grid (`RESOURCE_GRID_STEP` 10, `GRID_CELL_HIT_PROB` 0.48); more forest groves; **meadow copses** (clustered wood on plains/wetland); **MINERAL_QUAD** sprinkle so every biome often drops stone/gravel/clay/dirt; stronger mineral boost pass with global mineral pick; improves odds that a typical viewport shows several trees and mixed minerals
+
 ## [0.9.4] - 2026-04-16
 
 ### Added

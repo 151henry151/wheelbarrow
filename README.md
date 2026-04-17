@@ -37,7 +37,7 @@ Inspired by the spirit of [A Tractor](https://store.steampowered.com/app/779050/
 | J | **Bridge** — face a water tile; pay coin cost once per tile, then deliver wood until the bridge completes (not on another player’s land) |
 | O | Withdraw **wheat** from your **silo** into the barrow |
 | E | Context interact — town hall / NPC shop / **pile menu** (set prices, buy, or **Sell all at NPC market** autopilot on your piles) / trade at player market |
-| F | Farm action — plant wheat / fertilize / harvest |
+| F | Farm action — plant wheat (spring only) / fertilize / harvest / till |
 | H | Toggle HUD (hidden by default — just press H to see it) |
 | 1–9 | Select item in any open menu |
 | Esc | Cancel parcel preview / close menu |
@@ -49,7 +49,7 @@ Inspired by the spirit of [A Tractor](https://store.steampowered.com/app/779050/
 4. **Pile resources** on your land (`U`), set a sell price (`E`), and let other players buy from you — no market building required
 5. **Build structures** — pay the **starting coin** cost to place a **construction site**, then carry **foundation** and **building** materials to the tile and press **`G`** to deliver each load until the building completes (horse stable, gravel pit, compost heap, topsoil mound, **player market**, **town hall**, **grain silo**). Use **`X`** to cancel a site and recover deposited materials (coins spent to start are not refunded).
 6. **Build a Player Market** — **2000c** to start the site, then staged stone/wood delivery — set custom buy and sell prices for any goods; the most powerful economic tool in the game
-7. **Farm wheat** — buy seeds from the Seed Shop, plant on owned land, optionally fertilize for double yield, harvest in ~10–20 min; **uncovered wheat piles rot into compost in winter** — store grain in a **silo** to protect it
+7. **Farm wheat** — buy seeds from the Seed Shop, **plant only in spring** on owned tilled land, optionally fertilize for double yield, harvest in ~10–20 min; **uncovered wheat piles rot into compost in winter** — store grain in a **silo** to protect it
 8. **Build a Grain Silo** — **500c** to start, **60 stone** + **80 wood** delivered in trips; unload wheat with **`U`** on the silo, retrieve with **`O`**
 9. **Build a Town Hall** — **5000c** to start the site, then staged foundation and building materials — become a town's founder: name it, set a sales tax (0–30%), and govern which structures and goods are allowed
 10. **Upgrade your wheelbarrow** at the General Store — larger bucket (6 tiers), tire type (regular → tubeless → heavy-duty), handle material (wood → steel → fiberglass), and barrow material (plastic → steel → aluminium); material choices affect both speed and maintenance
@@ -91,7 +91,7 @@ All NPC shops are ~56 tiles from spawn — not visible at the starting field. Ex
 - Some purchased **parcel tiles** are **poor soil** (patchy, random per plot) — you cannot see which tiles are poor until you **own** the parcel; till then fails with a notice until you deposit **1 dirt** per tile (**`I`**).
 
 ### Seasons
-The year cycles through **Spring → Summer → Fall → Winter** (15 minutes each). Farming is tuned around the season cycle; the current season and time remaining are shown in the HUD. **Winter** kills crops still in the field; **wheat** left in **piles** on the ground rots into **compost** — **silos** keep stored wheat safe.
+The year cycles through **Spring → Summer → Fall → Winter** (15 minutes each). **Planting wheat** is allowed **only in spring**; you can till soil any time, but `[F]` to plant seeds succeeds only while the HUD says **spring**. **Winter** kills crops still in the field; **wheat** left in **piles** on the ground rots into **compost** — **silos** keep stored wheat safe.
 
 ### Resource types
 | Resource | Where | NPC price | Notes |
@@ -106,7 +106,7 @@ The year cycles through **Spring → Summer → Fall → Winter** (15 minutes ea
 | Dirt | Widespread | 1c | Low value, fast replenish |
 | Wheat | Farmed | 5c | Needs farming skill |
 
-**Fresh database / first seed:** wild nodes use a denser biome scatter (~3× stone, gravel, clay, dirt, topsoil, etc. vs the old grid spacing); forest wood uses many more grove placements (~6×) and never adds a standalone tree — each grove commits only if at least three trees land. Tutorial wood near the NPC shops is also three trees per spot, not single stumps.
+**Fresh database / first seed:** biomes include a wide **forest** band plus **meadow copses** (clustered trees on plains/wetland); the grid is dense and often drops the four base **minerals** (stone, gravel, clay, dirt) in any biome so nearby tiles are not empty. **Existing** live worlds: after upgrading, run `scripts/densify_resource_nodes.py` once (see `deploy/README.md`) to add nodes without resetting the database.
 
 ---
 
@@ -191,4 +191,4 @@ See `wheelbarrow.service` for the service unit template. Deployment is handled m
 
 ## Version
 
-Current version: **0.9.4** (see `VERSION`, `pyproject.toml`, and cache-bust query on scripts in `client/index.html`). See [CHANGELOG.md](CHANGELOG.md).
+Current version: **0.9.6** (see `VERSION`, `pyproject.toml`, and cache-bust query on scripts in `client/index.html`). See [CHANGELOG.md](CHANGELOG.md).

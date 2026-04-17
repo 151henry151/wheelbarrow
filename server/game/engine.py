@@ -1287,7 +1287,7 @@ class GameEngine:
             self.soil[(tx, ty)] = 1
             await self._send(player_id, {
                 "type": "notice",
-                "msg": "Tilled — frosted stubble cleared. Soil is ready for seeds.",
+                "msg": "Tilled — frosted stubble cleared. Plant wheat in spring when the soil is tilled.",
             })
             return
 
@@ -1360,6 +1360,11 @@ class GameEngine:
             return
 
         if self._soil_ready_for_planting(tx, ty):
+            cdef = CROP_DEFS["wheat"]
+            if self.season.season != cdef["plant_season"]:
+                await self._send(player_id, {"type": "notice",
+                    "msg": "You can only plant wheat in spring — wait for the next spring."})
+                return
             pocket = player.setdefault("pocket", {})
             if pocket.get("wheat_seed", 0) <= 0:
                 await self._send(player_id, {"type": "notice",
@@ -1372,7 +1377,6 @@ class GameEngine:
             pocket["wheat_seed"] -= 1
             if pocket["wheat_seed"] <= 0:
                 del pocket["wheat_seed"]
-            cdef     = CROP_DEFS["wheat"]
             ready_at = now_utc + datetime.timedelta(seconds=cdef["grow_time_s"])
             row      = await queries.create_crop(parcel["id"], player_id, tx, ty, "wheat", ready_at)
             row["ready_at"] = ready_at
@@ -1390,7 +1394,7 @@ class GameEngine:
 
         await queries.upsert_soil_tile(tx, ty, 1)
         self.soil[(tx, ty)] = 1
-        await self._send(player_id, {"type": "notice", "msg": "Tilled the soil. Plant wheat seeds when ready."})
+        await self._send(player_id, {"type": "notice", "msg": "Tilled the soil. Plant wheat seeds in spring ([F])."})
 
     # ---- player market ------------------------------------------------------
 
