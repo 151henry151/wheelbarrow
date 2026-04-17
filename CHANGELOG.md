@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.8] - 2026-04-17
+
+### Fixed
+- **Client** (`client/js/renderer.js`): when grass tile count exceeds budget, clamp the square to the **player tile** instead of the frustum bounding-box center — shallow views skew the AABB toward the horizon and had been dropping **near** ground while a distant patch still drew
+
 ## [0.11.7] - 2026-04-17
 
 ### Fixed

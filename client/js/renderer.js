@@ -425,16 +425,19 @@ const Renderer = (() => {
 
   /**
    * When the frustum projects to more tiles than we can instance, shrink to a square centered on
-   * the frustum so we never “run out” of grass mid-rectangle (which looked like missing ground).
+   * the **player tile**, not the frustum AABB center. At shallow pitch the ground AABB is huge and
+   * skewed toward the horizon — its center can sit far in front of the player, so a budget square
+   * around that center omitted tiles near the camera and under the character (distant ground still
+   * drew inside the same over-large rect before the row loop hit MAX_GRASS).
    */
-  function _clampTileRectToBudget(sx, sy, ex, ey, wx, wy, maxTiles) {
+  function _clampTileRectToBudget(sx, sy, ex, ey, wx, wy, maxTiles, px, py) {
     const w = ex - sx + 1;
     const h = ey - sy + 1;
     if (w <= 0 || h <= 0) return { sx, sy, ex, ey };
     if (w * h <= maxTiles) return { sx, sy, ex, ey };
-    const cx = Math.floor((sx + ex) / 2);
-    const cy = Math.floor((sy + ey) / 2);
-    let half = Math.min(Math.floor(Math.sqrt(maxTiles) / 2), wx, wy);
+    const cx = Math.max(0, Math.min(wx - 1, Math.floor(px)));
+    const cy = Math.max(0, Math.min(wy - 1, Math.floor(py)));
+    let half = Math.floor(Math.sqrt(maxTiles) / 2);
     while (half > 0) {
       const nsx = Math.max(0, cx - half);
       const nex = Math.min(wx - 1, cx + half);
@@ -1267,7 +1270,7 @@ const Renderer = (() => {
       ey = Math.min(wy - 1, Math.ceil(py + span));
     }
 
-    const clipped = _clampTileRectToBudget(sx, sy, ex, ey, wx, wy, MAX_GRASS);
+    const clipped = _clampTileRectToBudget(sx, sy, ex, ey, wx, wy, MAX_GRASS, px, py);
     sx = clipped.sx;
     sy = clipped.sy;
     ex = clipped.ex;
