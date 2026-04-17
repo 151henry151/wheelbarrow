@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.1] - 2026-04-17
+
+### Fixed
+- **Client** (`client/js/renderer.js`): **NPC shop loop** renamed ground-height `const sy` to **`shopGy`** — it shadowed the viewport **`sy`** parameter and triggered a temporal dead zone on `shop.y < sy - 2`, freezing **`draw()`**
+
 ## [0.11.0] - 2026-04-17
 
 ### Added

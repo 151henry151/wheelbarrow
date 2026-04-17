@@ -890,15 +890,15 @@ const Renderer = (() => {
     for (const shop of s.npc_shops || []) {
       if (shop.x < sx - 2 || shop.x > ex + 2 || shop.y < sy - 2 || shop.y > ey + 2) continue;
       const { x, z } = _worldXZ(shop.x, shop.y);
-      const sy = _groundY(shop.x, shop.y);
+      const shopGy = _groundY(shop.x, shop.y);
       let grp;
       if (shop.label.includes('Seed')) grp = _marketMesh(0x206020, 0x40a040);
       else if (shop.label.includes('General')) grp = _marketMesh(0x404080, 0x6060a0);
       else grp = _marketMesh(0x804040, 0xa06060);
-      grp.position.set(x, sy, z);
+      grp.position.set(x, shopGy, z);
       dynamicRoot.add(grp);
       const shortName = shop.label.replace(' Shop', '').replace(' Store', '');
-      _spriteText(shortName, x, sy + 48, z, 0xccccff, false);
+      _spriteText(shortName, x, shopGy + 48, z, 0xccccff, false);
     }
   }
 
