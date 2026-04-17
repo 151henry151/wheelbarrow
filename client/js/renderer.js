@@ -241,7 +241,10 @@ const Renderer = (() => {
       const dy = e.clientY - _lastPtrY;
       _lastPtrX = e.clientX;
       _lastPtrY = e.clientY;
-      _camYaw += dx * 0.0045;
+      // Yaw orbit only while not driving (forward/back); pitch always user-controlled
+      if (!s.cameraFollowDriving) {
+        _camYaw += dx * 0.0045;
+      }
       // Drag up → more top-down; drag down → flatter toward horizon
       _camPitch -= dy * 0.0045;
       _camPitch = Math.max(PITCH_MIN, Math.min(PITCH_MAX, _camPitch));
@@ -278,8 +281,24 @@ const Renderer = (() => {
     return 0;
   }
 
+  function _lerpAngleRad(from, to, t) {
+    let d = to - from;
+    while (d > Math.PI) d -= 2 * Math.PI;
+    while (d < -Math.PI) d += 2 * Math.PI;
+    return from + d * t;
+  }
+
   function _updateCamera(px, py) {
     const { x: tx, z: tz } = _worldXZ(px, py);
+    if (
+      s.cameraFollowDriving
+      && s.player
+      && Number.isFinite(s.player.angle)
+    ) {
+      // Behind wheelbarrow: horizontal offset aligns with −(cos θ, sin θ) in XZ → yaw = atan2(-cos θ, -sin θ)
+      const targetYaw = Math.atan2(-Math.cos(s.player.angle), -Math.sin(s.player.angle));
+      _camYaw = _lerpAngleRad(_camYaw, targetYaw, 0.22);
+    }
     const cp = Math.cos(_camPitch);
     const sp = Math.sin(_camPitch);
     const cy = Math.cos(_camYaw);

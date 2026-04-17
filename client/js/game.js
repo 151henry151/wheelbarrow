@@ -113,6 +113,8 @@ const state = {
 
   sellAutopilotActive: false,
   sellAutopilotPile:   null,   // { x, y, resource_type } while running
+  /** Set each frame: orbit yaw follows wheelbarrow while throttling or autopilot */
+  cameraFollowDriving: false,
   _tickWaiters:        [],
   _soldWaiter:         null,
 };
@@ -1241,6 +1243,13 @@ window.addEventListener('load', () => {
 
     function loop(now) {
       Input.update(now, state.player, state.world);
+      state.cameraFollowDriving = !!(
+        state.player
+        && (
+          state.sellAutopilotActive
+          || (typeof Input.isDrivingThrottle === 'function' && Input.isDrivingThrottle())
+        )
+      );
       Renderer.draw();
       updateHud();
       if (!state.hudVisible && state.player) {

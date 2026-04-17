@@ -54,5 +54,10 @@ const Input = (() => {
     for (const k of Object.keys(held)) delete held[k];
   }
 
-  return { init, update, setAutopilotBlocked, clearHeldKeys };
+  /** True while ArrowUp/ArrowDown held — camera can follow wheelbarrow heading. */
+  function isDrivingThrottle() {
+    return !!(held.ArrowUp || held.ArrowDown);
+  }
+
+  return { init, update, setAutopilotBlocked, clearHeldKeys, isDrivingThrottle };
 })();

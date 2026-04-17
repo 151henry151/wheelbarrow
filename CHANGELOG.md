@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.2] - 2026-04-17
+
+### Changed
+- **Client** (`client/js/game.js`, `client/js/input.js`, `client/js/renderer.js`): **Driving camera** — while **ArrowUp/ArrowDown** or **sell autopilot** is active, **orbit yaw** smoothly follows the wheelbarrow **`angle`** (behind-the-barrow view); **horizontal drag** only affects yaw when **not** driving; **pitch** (drag up/down, wheel zoom, **[** / **]**) unchanged
+
 ## [0.11.1] - 2026-04-17
 
 ### Fixed
