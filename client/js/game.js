@@ -565,7 +565,7 @@ function _updateHint() {
       hints.push('[F] till — clear frosted crop');
     } else {
       hints.push(crop.ready ? '[F] harvest crop'
-        : '[F] fertilize (barrow fertilizer or manure) / check crop');
+        : '[F] fertilize (fertilizer, compost, or manure in barrow) / check crop');
     }
   } else if (parcel && parcel.owner_id === p.id) {
     if (_poorSoilAt(px, py)) {

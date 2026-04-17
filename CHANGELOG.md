@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.7] - 2026-04-17
+
+### Changed
+- **Farming**: allow **compost** in the barrow (or pocket) to fertilize wheat like **fertilizer** and **manure** — same growth boost and yield; update HUD hint and README
+
 ## [0.9.6] - 2026-04-16
 
 ### Changed

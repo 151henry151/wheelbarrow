@@ -49,7 +49,7 @@ Inspired by the spirit of [A Tractor](https://store.steampowered.com/app/779050/
 4. **Pile resources** on your land (`U`), set a sell price (`E`), and let other players buy from you — no market building required
 5. **Build structures** — pay the **starting coin** cost to place a **construction site**, then carry **foundation** and **building** materials to the tile and press **`G`** to deliver each load until the building completes (horse stable, gravel pit, compost heap, topsoil mound, **player market**, **town hall**, **grain silo**). Use **`X`** to cancel a site and recover deposited materials (coins spent to start are not refunded).
 6. **Build a Player Market** — **2000c** to start the site, then staged stone/wood delivery — set custom buy and sell prices for any goods; the most powerful economic tool in the game
-7. **Farm wheat** — buy seeds from the Seed Shop, **plant only in spring** on owned tilled land, optionally fertilize for double yield, harvest in ~10–20 min; **uncovered wheat piles rot into compost in winter** — store grain in a **silo** to protect it
+7. **Farm wheat** — buy seeds from the Seed Shop, **plant only in spring** on owned tilled land, optionally **fertilize** within the time window for double yield using **NPC fertilizer**, **compost** (from a compost heap or piles), or **manure** (from a stable); harvest in ~10–20 min; **uncovered wheat piles rot into compost in winter** — store grain in a **silo** to protect it
 8. **Build a Grain Silo** — **500c** to start, **60 stone** + **80 wood** delivered in trips; unload wheat with **`U`** on the silo, retrieve with **`O`**
 9. **Build a Town Hall** — **5000c** to start the site, then staged foundation and building materials — become a town's founder: name it, set a sales tax (0–30%), and govern which structures and goods are allowed
 10. **Upgrade your wheelbarrow** at the General Store — larger bucket (6 tiers), tire type (regular → tubeless → heavy-duty), handle material (wood → steel → fiberglass), and barrow material (plastic → steel → aluminium); material choices affect both speed and maintenance
@@ -191,4 +191,4 @@ See `wheelbarrow.service` for the service unit template. Deployment is handled m
 
 ## Version
 
-Current version: **0.9.6** (see `VERSION`, `pyproject.toml`, and cache-bust query on scripts in `client/index.html`). See [CHANGELOG.md](CHANGELOG.md).
+Current version: **0.9.7** (see `VERSION`, `pyproject.toml`, and cache-bust query on scripts in `client/index.html`). See [CHANGELOG.md](CHANGELOG.md).

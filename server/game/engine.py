@@ -1319,8 +1319,12 @@ class GameEngine:
             bucket = player.setdefault("bucket", {})
             fert_b = float(bucket.get("fertilizer", 0) or 0)
             fert_p = float(pocket.get("fertilizer", 0) or 0)
+            comp_b = float(bucket.get("compost", 0) or 0)
+            comp_p = float(pocket.get("compost", 0) or 0)
             man_b  = float(bucket.get("manure", 0) or 0)
-            if not crop.get("fertilized_at") and (fert_b >= 1 or fert_p > 0 or man_b >= 1):
+            if not crop.get("fertilized_at") and (
+                fert_b >= 1 or fert_p > 0 or comp_b >= 1 or comp_p > 0 or man_b >= 1
+            ):
                 planted_at = crop["planted_at"]
                 if isinstance(planted_at, str):
                     planted_at = datetime.datetime.fromisoformat(planted_at)
@@ -1337,6 +1341,16 @@ class GameEngine:
                         if pocket["fertilizer"] <= 0:
                             del pocket["fertilizer"]
                         src = "fertilizer"
+                    elif comp_b >= 1:
+                        bucket["compost"] = round(comp_b - 1, 2)
+                        if bucket["compost"] <= 0:
+                            del bucket["compost"]
+                        src = "compost"
+                    elif comp_p > 0:
+                        pocket["compost"] = comp_p - 1
+                        if pocket["compost"] <= 0:
+                            del pocket["compost"]
+                        src = "compost"
                     else:
                         bucket["manure"] = round(man_b - 1, 2)
                         if bucket["manure"] <= 0:
@@ -1346,7 +1360,12 @@ class GameEngine:
                     crop["fertilized_at"] = now_utc.isoformat()
                     crop["ready_at"]      = new_ready
                     await queries.fertilize_crop(crop["id"], new_ready)
-                    note = "Fertilized! Crop grows faster." if src == "fertilizer" else "Applied manure — crop grows faster."
+                    if src == "fertilizer":
+                        note = "Fertilized! Crop grows faster."
+                    elif src == "compost":
+                        note = "Applied compost — crop grows faster."
+                    else:
+                        note = "Applied manure — crop grows faster."
                     await self._send(player_id, {"type": "notice", "msg": note})
                     return
             mins = max(0, int((ready_at - now_utc).total_seconds() // 60))
