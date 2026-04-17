@@ -304,6 +304,30 @@ const Renderer = (() => {
     roadMesh.instanceMatrix.needsUpdate = true;
   }
 
+  function _soilFurrows(sx, sy, ex, ey) {
+    const crops = s.crops || [];
+    const atCrop = (x, y) => crops.some((c) => c.x === x && c.y === y);
+    const pts = [];
+    for (const st of s.soil_tiles || []) {
+      if (!st.tilled || atCrop(st.x, st.y)) continue;
+      if (st.x < sx - 1 || st.x > ex + 1 || st.y < sy - 1 || st.y > ey + 1) continue;
+      const ox = st.x * T;
+      const oz = st.y * T;
+      for (let i = 0; i < 4; i++) {
+        const x0 = ox + 5 + i * 7;
+        const z0 = oz + 5;
+        const x1 = ox + 4 + i * 7;
+        const z1 = oz + T - 5;
+        pts.push(new THREE.Vector3(x0, 1.2, z0), new THREE.Vector3(x1, 1.2, z1));
+      }
+    }
+    if (!pts.length) return;
+    const geom = new THREE.BufferGeometry().setFromPoints(pts);
+    const mat = new THREE.LineBasicMaterial({ color: 0x5f4128, transparent: true, opacity: 0.35 });
+    const lines = new THREE.LineSegments(geom, mat);
+    dynamicRoot.add(lines);
+  }
+
   function _bridges(sx, sy, ex, ey) {
     for (const b of s.bridge_tiles || []) {
       if (b.x < sx - 1 || b.x > ex + 1 || b.y < sy - 1 || b.y > ey + 1) continue;
@@ -964,6 +988,7 @@ const Renderer = (() => {
 
     _setGrassTiles(sx, sy, ex, ey);
     _waterAndRoadsInView(sx, sy, ex, ey);
+    _soilFurrows(sx, sy, ex, ey);
     _bridges(sx, sy, ex, ey);
     _towns();
     _parcels(sx, sy, ex, ey);

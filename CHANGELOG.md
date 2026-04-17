@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.10.0] - 2026-04-16
 
 ### Added
-- **Client** (`client/vendor/three.min.js`, `client/js/renderer.js`): **Three.js WebGL** renderer — perspective camera, follow + **mouse-drag orbit**, **[** / **]** pitch, shadows, fog, instanced grass/water/roads, 3D meshes for resources, structures, piles, crops, wheelbarrows, and **sprite labels** for names and UI text
+- **Client** (`client/vendor/three.min.js`, `client/js/renderer.js`): **Three.js WebGL** renderer — perspective camera, follow + **mouse-drag orbit**, **[** / **]** pitch, shadows, fog, instanced grass/water/roads, **tilled-soil furrow lines**, 3D meshes for resources, structures, piles, crops, wheelbarrows, and **sprite labels** for names and UI text
 
 ### Changed
 - **Server** (`server/game/engine.py`): **block tilling in winter** (frozen ground), including clearing **frost-killed** crops — **spring** required for till and plant (planting was already spring-only)
