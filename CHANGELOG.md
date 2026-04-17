@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.3] - 2026-04-17
+
+### Fixed
+- **Client** (`client/js/renderer.js`): **Horizontal / low-pitch view** — scale **FogExp2** density by orbit pitch (weaker fog near the horizon) so terrain does not wash out to sky when tilting toward a driving angle; **frustum → ground** tile bounds use a **ray–plane hit or horizon fallback** when `intersectPlane` misses at shallow angles
+
 ## [0.11.2] - 2026-04-17
 
 ### Changed

@@ -13,6 +13,8 @@ const Renderer = (() => {
     fall:   0xc8b898,
     winter: 0xa8b8c8,
   };
+  /** Base FogExp2 density when camera pitch is mostly top-down (see `_applySeasonAtmosphere`). */
+  const FOG_DENSITY_TOPDOWN = 0.00028;
   /** Fog tints distant terrain toward horizon — keep close to sky for a natural horizon line. */
   const SEASON_FOG = {
     spring: 0x7aa8c0,
@@ -68,7 +70,6 @@ const Renderer = (() => {
   let _dummy;
   let _c;
   let _raycaster;
-  let _groundPlane;
   let _planeHit;
   const nodePool = [];
   let nodePoolUsed = 0;
@@ -112,7 +113,16 @@ const Renderer = (() => {
     const sky = SEASON_SKY[name] ?? SEASON_SKY.spring;
     const fg = SEASON_FOG[name] ?? SEASON_FOG.spring;
     scene.background = new THREE.Color(sky);
-    scene.fog = new THREE.FogExp2(fg, 0.00028);
+    // FogExp2 uses distance along the view ray. At shallow pitch (near horizontal), rays to the
+    // ground are much longer than in top-down view, so the same density whites out terrain. Scale
+    // density by orbit pitch so low angles stay visible; full strength near top-down.
+    const t =
+      (PITCH_MAX > PITCH_MIN)
+        ? (_camPitch - PITCH_MIN) / (PITCH_MAX - PITCH_MIN)
+        : 1;
+    const u = Math.max(0, Math.min(1, t));
+    const density = FOG_DENSITY_TOPDOWN * (0.06 + 0.94 * Math.pow(u, 1.15));
+    scene.fog = new THREE.FogExp2(fg, density);
     if (hemi && amb) {
       if (name === 'summer') {
         hemi.intensity = 0.55;
@@ -141,7 +151,6 @@ const Renderer = (() => {
     _c = new THREE.Color();
     _planeHit = new THREE.Vector3();
     _raycaster = new THREE.Raycaster();
-    _groundPlane = new THREE.Plane();
     scene = new THREE.Scene();
 
     camera = new THREE.PerspectiveCamera(48, 1, 2, 12000);
@@ -343,13 +352,42 @@ const Renderer = (() => {
   ];
 
   /**
+   * Intersection of a world ray with y = planeY, or a far point along horizontal view for horizon skimming.
+   * Ensures frustum samples always contribute when {@link THREE.Ray#intersectPlane} misses (shallow pitch).
+   */
+  function _rayGroundSample(r, planeY, out) {
+    const oy = r.origin.y;
+    const dy = r.direction.y;
+    const eps = 1e-5;
+    if (Math.abs(dy) > eps) {
+      const t = (planeY - oy) / dy;
+      if (t > 0) {
+        out.copy(r.origin).addScaledVector(r.direction, t);
+        return;
+      }
+    }
+    const dx = r.direction.x;
+    const dz = r.direction.z;
+    const hlen = Math.hypot(dx, dz);
+    const dist = Math.min((camera && camera.far) ? camera.far * 0.92 : 11000, 11000);
+    if (hlen < eps) {
+      out.set(r.origin.x, planeY, r.origin.z);
+      return;
+    }
+    out.set(
+      r.origin.x + (dx / hlen) * dist,
+      planeY,
+      r.origin.z + (dz / hlen) * dist,
+    );
+  }
+
+  /**
    * Tile indices (inclusive) whose ground may appear in the current view.
    * Uses frustum vs ground plane — the old canvas-pixel rect was wrong for perspective and caused diagonal cutoffs.
    */
   function _visibleTileRange(wx, wy, px, py) {
-    if (!_raycaster || !_groundPlane || !camera || !_planeHit) return null;
+    if (!_raycaster || !camera || !_planeHit) return null;
     const planeY = _groundY(px, py);
-    _groundPlane.set(new THREE.Vector3(0, 1, 0), -planeY);
     const pcx = px * T + T / 2;
     const pcz = py * T + T / 2;
     let minX = pcx;
@@ -361,12 +399,11 @@ const Renderer = (() => {
       const nx = _NDC_FRUSTUM_SAMPLES[i][0];
       const ny = _NDC_FRUSTUM_SAMPLES[i][1];
       _raycaster.setFromCamera(new THREE.Vector2(nx, ny), camera);
-      if (_raycaster.ray.intersectPlane(_groundPlane, _planeHit)) {
-        minX = Math.min(minX, _planeHit.x);
-        maxX = Math.max(maxX, _planeHit.x);
-        minZ = Math.min(minZ, _planeHit.z);
-        maxZ = Math.max(maxZ, _planeHit.z);
-      }
+      _rayGroundSample(_raycaster.ray, planeY, _planeHit);
+      minX = Math.min(minX, _planeHit.x);
+      maxX = Math.max(maxX, _planeHit.x);
+      minZ = Math.min(minZ, _planeHit.z);
+      maxZ = Math.max(maxZ, _planeHit.z);
     }
     const margin = T * 2;
     minX -= margin;
