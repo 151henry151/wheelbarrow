@@ -1279,8 +1279,12 @@ class GameEngine:
         crop    = self.crops.get((tx, ty))
         now_utc = datetime.datetime.utcnow()
 
-        # Frost-killed crop — till to clear stubble and prepare soil
+        # Frost-killed crop — till to clear stubble and prepare soil (spring+ only; frozen in winter)
         if crop and crop.get("winter_dead"):
+            if self.season.season == 3:  # winter
+                await self._send(player_id, {"type": "notice",
+                    "msg": "The ground is frozen — wait for spring to till away frosted crops."})
+                return
             if not parcel or parcel.get("owner_id") != player_id:
                 await self._send(player_id, {"type": "notice", "msg": "Not your land."})
                 return
@@ -1425,6 +1429,11 @@ class GameEngine:
         if (tx, ty) in self.poor_soil:
             await self._send(player_id, {"type": "notice",
                 "msg": "This soil is poor — press [I] with at least 1 dirt in your barrow to improve the tile, then till."})
+            return
+
+        if self.season.season == 3:  # winter — cannot till untilled soil
+            await self._send(player_id, {"type": "notice",
+                "msg": "The ground is frozen — wait for spring to till and plant."})
             return
 
         await queries.upsert_soil_tile(tx, ty, 1)

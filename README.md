@@ -37,7 +37,10 @@ Inspired by the spirit of [A Tractor](https://store.steampowered.com/app/779050/
 | J | **Bridge** — face a water tile; pay coin cost once per tile, then deliver wood until the bridge completes (not on another player’s land) |
 | O | Withdraw **wheat** from your **silo** into the barrow |
 | E | Context interact — town hall / NPC shop / **pile menu** (set prices, buy, or **Sell all at NPC market** autopilot on your piles) / trade at player market |
-| F | Farm action — plant wheat (spring only) / fertilize / harvest / till |
+| F | Farm action — plant wheat (spring only) / fertilize / harvest / till (not in winter — ground frozen) |
+| Drag | Orbit camera (left mouse) |
+| [ | More overhead camera angle |
+| ] | More horizon camera angle |
 | H | Toggle HUD (hidden by default — just press H to see it) |
 | 1–9 | Select item in any open menu |
 | Esc | Cancel parcel preview / close menu |
@@ -91,7 +94,7 @@ All NPC shops are ~56 tiles from spawn — not visible at the starting field. Ex
 - Some purchased **parcel tiles** are **poor soil** (patchy, random per plot) — you cannot see which tiles are poor until you **own** the parcel; till then fails with a notice until you deposit **1 dirt** per tile (**`I`**).
 
 ### Seasons
-The year cycles through **Spring → Summer → Fall → Winter** (15 minutes each). **Planting wheat** is allowed **only in spring**; you can till soil any time, but `[F]` to plant seeds succeeds only while the HUD says **spring**. **Winter** kills crops still in the field; **wheat** left in **piles** on the ground rots into **compost** — **silos** keep stored wheat safe. You cannot **[F]** till or plant on a tile until **ground piles** on that tile are cleared (load into your barrow), including compost from rotted wheat.
+The year cycles through **Spring → Summer → Fall → Winter** (15 minutes each). **Planting wheat** is allowed **only in spring**. In **winter** the **ground is frozen** — you cannot **[F]** till untilled soil or clear **frost-killed** stubble until **spring**; tilled plots also wait until spring to plant. **Winter** kills crops still in the field; **wheat** left in **piles** on the ground rots into **compost** — **silos** keep stored wheat safe. You cannot **[F]** till or plant on a tile until **ground piles** on that tile are cleared (load into your barrow), including compost from rotted wheat.
 
 ### Resource types
 | Resource | Where | NPC price | Notes |
@@ -117,7 +120,7 @@ The year cycles through **Spring → Summer → Fall → Winter** (15 minutes ea
 | Backend | Python 3.11, FastAPI, WebSockets |
 | Game loop | asyncio server-side tick |
 | Database | MariaDB |
-| Frontend | HTML5 Canvas, vanilla JavaScript |
+| Frontend | HTML5 Canvas + Three.js (WebGL), vanilla JavaScript |
 | Server | Debian 12, nginx reverse proxy |
 | Domain | [hromp.com/wheelbarrow/](https://hromp.com/wheelbarrow/) |
 
@@ -191,4 +194,4 @@ See `wheelbarrow.service` for the service unit template. Deployment is handled m
 
 ## Version
 
-Current version: **0.9.10** (see `VERSION`, `pyproject.toml`, and cache-bust query on scripts in `client/index.html`). See [CHANGELOG.md](CHANGELOG.md).
+Current version: **0.10.0** (see `VERSION`, `pyproject.toml`, and cache-bust query on scripts in `client/index.html`). See [CHANGELOG.md](CHANGELOG.md).

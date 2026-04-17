@@ -51,7 +51,14 @@ body {
 
 /* ------------------------------------------------------------------ Canvas */
 #game-screen { position: relative; }
-canvas { display: block; image-rendering: pixelated; }
+canvas#game {
+  display: block;
+  width: 100vw;
+  height: 100vh;
+  touch-action: none;
+  cursor: grab;
+}
+canvas#game:active { cursor: grabbing; }
 
 /* -------------------------------------------------------------- HUD toggle */
 #hud-toggle {

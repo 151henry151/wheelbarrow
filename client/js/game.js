@@ -559,13 +559,16 @@ function _updateHint() {
   const near = state.nodes.find(n => !n.is_structure && Math.abs(n.x-px)<=1 && Math.abs(n.y-py)<=1 && n.amount > 0);
   if (near) hints.push(`Collecting ${near.type}...`);
 
+  const isWinter = state.season && state.season.name === 'winter';
   const crop = state.crops.find(c => c.x === px && c.y === py);
   if (crop) {
     if (crop.winter_dead) {
       if (pilesHere.length) {
         hints.push('Clear pile on this tile before [F] till');
       }
-      hints.push('[F] till — clear frosted crop');
+      hints.push(isWinter
+        ? 'Frozen soil — wait for spring to [F] till frosted crop'
+        : '[F] till — clear frosted crop');
     } else {
       hints.push(crop.ready ? '[F] harvest crop'
         : '[F] fertilize (fertilizer, compost, or manure in barrow) / check crop');
@@ -582,11 +585,15 @@ function _updateHint() {
     } else if (_soilTilledAt(px, py) === 1) {
       if (state.season && state.season.name === 'spring') {
         hints.push('[F] plant wheat (tilled soil)');
+      } else if (isWinter) {
+        hints.push('Tilled — frozen ground; plant wheat in spring');
       } else {
         hints.push('Tilled — planting wheat is only allowed in spring');
       }
     } else {
-      hints.push('[F] till soil before planting');
+      hints.push(isWinter
+        ? 'Frozen ground — wait for spring to [F] till and plant'
+        : '[F] till soil before planting');
     }
   }
 
