@@ -1,96 +1,49 @@
 /* global Renderer, Terrain */
 const Input = (() => {
-  const BASE_INTERVAL_MS = 150;
-  const dirKeys = { ArrowUp:'up', ArrowDown:'down', ArrowLeft:'left', ArrowRight:'right' };
-  const held = {};
-  let lastMove    = 0;
-  let speedMult   = 1.0;   // increased when flat tyre
+  /** Input sample rate (matches server game tick order of magnitude). */
+  const INPUT_INTERVAL_MS = 50;
+  let lastSend = 0;
   let sendFn      = null;
   let onKey       = null;
   let autopilotBlocked = false;
+
+  const held = {};
 
   function init(fn, keyFn) {
     sendFn = fn;
     onKey  = keyFn;
     window.addEventListener('keydown', e => {
-      // Never intercept browser shortcuts (Ctrl/Alt/Meta combos like Ctrl+R, Ctrl+Shift+R)
       if (e.ctrlKey || e.altKey || e.metaKey) return;
-      if (dirKeys[e.key]) { e.preventDefault(); held[e.key] = true; return; }
+      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+        e.preventDefault();
+        held[e.key] = true;
+        return;
+      }
       e.preventDefault();
       onKey && onKey(e.key);
     });
     window.addEventListener('keyup', e => { delete held[e.key]; });
   }
 
-  function setSpeedMult(mult) {
-    speedMult = mult;
-  }
-
+  /**
+   * Tank-style: Up/Down = forward/back along wheelbarrow facing; Left/Right = rotate.
+   * Server integrates continuously (any angle).
+   */
   function update(now, player, world) {
     if (!sendFn || autopilotBlocked) return;
+    if (now - lastSend < INPUT_INTERVAL_MS) return;
 
-    let dir = null;
-    let terrainM = 1;
+    let fwd = 0;
+    let turn = 0;
+    if (held.ArrowUp) fwd += 1;
+    if (held.ArrowDown) fwd -= 1;
+    if (held.ArrowLeft) turn += 1;
+    if (held.ArrowRight) turn -= 1;
+    fwd = Math.max(-1, Math.min(1, fwd));
+    turn = Math.max(-1, Math.min(1, turn));
 
-    if (typeof Renderer !== 'undefined' && typeof Renderer.getCameraMoveBasis === 'function') {
-      const { fx, fz } = Renderer.getCameraMoveBasis();
-      let vx = 0;
-      let vz = 0;
-      if (held.ArrowUp) { vx += fx; vz += fz; }
-      if (held.ArrowDown) { vx -= fx; vz -= fz; }
-      if (held.ArrowLeft) { vx += fz; vz -= fx; }
-      if (held.ArrowRight) { vx -= fz; vz += fx; }
-      const len = Math.hypot(vx, vz);
-      if (len < 1e-8) return;
-      const nx = vx / len;
-      const nz = vz / len;
-      let best = 'up';
-      let bestDot = -Infinity;
-      const cardinals = [
-        ['up', -nz],
-        ['down', nz],
-        ['left', -nx],
-        ['right', nx],
-      ];
-      for (const [name, d] of cardinals) {
-        if (d > bestDot) {
-          bestDot = d;
-          best = name;
-        }
-      }
-      dir = best;
-      if (player && typeof Terrain !== 'undefined') {
-        terrainM = Terrain.moveIntervalMult(
-          player.x,
-          player.y,
-          dir,
-          world && world.w,
-          world && world.h,
-        );
-      }
-    } else {
-      for (const [key, d] of Object.entries(dirKeys)) {
-        if (held[key]) {
-          dir = d;
-          if (player && typeof Terrain !== 'undefined') {
-            terrainM = Terrain.moveIntervalMult(
-              player.x,
-              player.y,
-              dir,
-              world && world.w,
-              world && world.h,
-            );
-          }
-          break;
-        }
-      }
-      if (!dir) return;
-    }
-
-    const interval = BASE_INTERVAL_MS * speedMult * terrainM;
-    if (now - lastMove < interval) return;
-    sendFn({ type: 'move', dir });
-    lastMove = now;
+    lastSend = now;
+    sendFn({ type: 'move', fwd, turn });
   }
 
   function setAutopilotBlocked(v) {
@@ -101,5 +54,5 @@ const Input = (() => {
     for (const k of Object.keys(held)) delete held[k];
   }
 
-  return { init, update, setSpeedMult, setAutopilotBlocked, clearHeldKeys };
+  return { init, update, setAutopilotBlocked, clearHeldKeys };
 })();

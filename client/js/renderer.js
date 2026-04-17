@@ -211,7 +211,7 @@ const Renderer = (() => {
     waterMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     groundGroup.add(waterMesh);
 
-    const roadGeo = new THREE.BoxGeometry(T - 4, 2, T - 4);
+    const roadGeo = new THREE.BoxGeometry(T - 0.5, 1.8, T - 0.5);
     roadMat = new THREE.MeshLambertMaterial({ color: 0x6a5440 });
     roadMesh = new THREE.InstancedMesh(roadGeo, roadMat, MAX_ROAD);
     roadMesh.receiveShadow = true;
@@ -414,9 +414,34 @@ const Renderer = (() => {
       if (w.x < sx - 1 || w.x > ex + 1 || w.y < sy - 1 || w.y > ey + 1) continue;
       pushW(w.x, w.y);
     }
+    const roadKey = new Set((s.roads || []).map((r) => `${r.x},${r.y}`));
+    const hasR = (x, y) => roadKey.has(`${x},${y}`);
     for (const r of s.roads || []) {
       if (r.x < sx - 1 || r.x > ex + 1 || r.y < sy - 1 || r.y > ey + 1) continue;
       pushR(r.x, r.y);
+    }
+    let cornerN = 0;
+    const MAX_RC = 400;
+    for (const r of s.roads || []) {
+      if (cornerN >= MAX_RC) break;
+      const tx = r.x;
+      const ty = r.y;
+      if (tx < sx - 2 || tx > ex + 2 || ty < sy - 2 || ty > ey + 2) continue;
+      if (hasR(tx + 1, ty) && hasR(tx, ty + 1) && !hasR(tx + 1, ty + 1)) {
+        const wx = (tx + 1) * T;
+        const wz = (ty + 1) * T;
+        const gy = Math.max(_groundY(tx, ty), _groundY(tx + 1, ty), _groundY(tx, ty + 1)) + 1.1;
+        const tor = new THREE.Mesh(
+          new THREE.CylinderGeometry(T * 0.42, T * 0.42, 2.0, 12, 1, false, Math.PI, Math.PI / 2),
+          roadMat,
+        );
+        tor.rotation.x = Math.PI / 2;
+        tor.position.set(wx - T * 0.5, gy, wz - T * 0.5);
+        tor.castShadow = true;
+        tor.receiveShadow = true;
+        dynamicRoot.add(tor);
+        cornerN++;
+      }
     }
     waterMesh.count = wi;
     roadMesh.count = ri;
@@ -977,7 +1002,15 @@ const Renderer = (() => {
     return 0;
   }
 
-  function _wheelbarrow3d(grp, colorHex, flatTire, loadFrac, facing, label) {
+  /** Server angle (east=0, south=π/2) → Y rotation; discrete facing as fallback. */
+  function _yawFromFacingOrAngle(facingOrAngle) {
+    if (typeof facingOrAngle === 'number' && Number.isFinite(facingOrAngle)) {
+      return -facingOrAngle + Math.PI / 2;
+    }
+    return _facingYaw(facingOrAngle || 'down');
+  }
+
+  function _wheelbarrow3d(grp, colorHex, flatTire, loadFrac, facingOrAngle, label) {
     while (grp.children.length) {
       const ch = grp.children[0];
       ch.traverse((o) => {
@@ -991,7 +1024,7 @@ const Renderer = (() => {
       grp.remove(ch);
     }
     const col = new THREE.Color(colorHex);
-    const yaw = _facingYaw(facing);
+    const yaw = _yawFromFacingOrAngle(facingOrAngle);
     const tub = new THREE.Mesh(
       new THREE.BoxGeometry(22, 10, 18),
       new THREE.MeshLambertMaterial({ color: col }),
@@ -1050,7 +1083,8 @@ const Renderer = (() => {
       grp.position.set(x, gy, z);
       grp.userData.wx = x;
       grp.userData.wz = z;
-      _wheelbarrow3d(grp, '#6ab0e8', p.flat_tire, 0, face, p.username || '');
+      const orient = p.angle != null && Number.isFinite(p.angle) ? p.angle : face;
+      _wheelbarrow3d(grp, '#6ab0e8', p.flat_tire, 0, orient, p.username || '');
       grp.visible = true;
     }
     if (s.player) {
@@ -1065,7 +1099,8 @@ const Renderer = (() => {
       grp.position.set(x, gy, z);
       grp.userData.wx = x;
       grp.userData.wz = z;
-      _wheelbarrow3d(grp, '#f5c842', s.player.flat_tire, Math.min(1, total / cap), face, null);
+      const orient = s.player.angle != null && Number.isFinite(s.player.angle) ? s.player.angle : face;
+      _wheelbarrow3d(grp, '#f5c842', s.player.flat_tire, Math.min(1, total / cap), orient, null);
       grp.visible = true;
       if (s.player.username) _spriteText(s.player.username, x, gy + 38, z, 0xf5c842, true);
     }

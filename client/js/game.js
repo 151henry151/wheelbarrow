@@ -125,6 +125,15 @@ function _facingFromDelta(dx, dy) {
   return dy > 0 ? 'down' : 'up';
 }
 
+/** Server angle (radians): east=0, south=π/2 — map to cardinal for [L]/[J] hints. */
+function _facingFromAngle(a) {
+  if (a == null || !Number.isFinite(a)) return 'down';
+  const x = Math.cos(a);
+  const y = Math.sin(a);
+  if (Math.abs(x) >= Math.abs(y)) return x >= 0 ? 'right' : 'left';
+  return y >= 0 ? 'down' : 'up';
+}
+
 function _parcelAt(x, y) {
   for (const p of state.world_parcels) {
     if (x >= p.x && x < p.x + p.w && y >= p.y && y < p.y + p.h) return p;
@@ -227,55 +236,37 @@ function waitNextTick() {
   });
 }
 
-/** Matches Input + Terrain pacing (client-side move throttle). */
-const MOVE_BASE_INTERVAL_MS = 150;
-function _moveIntervalMsForDir(dir) {
-  if (!state.player) return MOVE_BASE_INTERVAL_MS;
-  const flatMult = state.player.flat_tire ? 3.0 : 1.0;
-  let terrainM = 1;
-  if (typeof Terrain !== 'undefined') {
-    terrainM = Terrain.moveIntervalMult(
-      state.player.x,
-      state.player.y,
-      dir,
-      state.world && state.world.w,
-      state.world && state.world.h,
-    );
-  }
-  return MOVE_BASE_INTERVAL_MS * _loadSpeedMult(state.player) * flatMult * terrainM;
-}
-
-function _nextDirToward(px, py, tx, ty) {
-  if (px < tx) return 'right';
-  if (px > tx) return 'left';
-  if (py < ty) return 'down';
-  if (py > ty) return 'up';
-  return null;
+function _angleWrap(d) {
+  let a = d;
+  while (a > Math.PI) a -= 2 * Math.PI;
+  while (a < -Math.PI) a += 2 * Math.PI;
+  return a;
 }
 
 async function _autopilotMoveToTile(tx, ty) {
+  const ARRIVE = 0.45;
   let guard = 0;
   while (
     state.sellAutopilotActive &&
-    (state.player.x !== tx || state.player.y !== ty) &&
-    guard++ < 6000
+    guard++ < 8000
   ) {
     const px = state.player.x;
     const py = state.player.y;
-    const dir = _nextDirToward(px, py, tx, ty);
-    if (!dir) break;
-    state.facing = dir;
-    const wantMs = _moveIntervalMsForDir(dir);
-    const t0 = typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now();
-    WS.send({ type: 'move', dir });
+    const dx = tx + 0.5 - px;
+    const dy = ty + 0.5 - py;
+    if (Math.hypot(dx, dy) < ARRIVE) break;
+    const desired = Math.atan2(dy, dx);
+    const cur = state.player.angle != null ? state.player.angle : Math.PI / 2;
+    const diff = _angleWrap(desired - cur);
+    const turn = Math.max(-1, Math.min(1, diff * 2.2));
+    let fwd = Math.abs(diff) < 0.35 ? 1.0 : 0.35;
+    state.facing = _facingFromAngle(cur);
+    WS.send({ type: 'move', fwd, turn });
     await waitNextTick();
-    if (state.player.x === px && state.player.y === py) await waitNextTick();
-    const elapsed = (typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now()) - t0;
-    if (elapsed < wantMs) {
-      await new Promise(resolve => setTimeout(resolve, wantMs - elapsed));
-    }
   }
-  return state.player.x === tx && state.player.y === ty;
+  const px = state.player.x;
+  const py = state.player.y;
+  return Math.hypot(tx + 0.5 - px, ty + 0.5 - py) < ARRIVE * 1.5;
 }
 
 /**
@@ -284,7 +275,7 @@ async function _autopilotMoveToTile(tx, ty) {
  */
 async function _waitLoadPhase(rtype, hx, hy) {
   while (state.sellAutopilotActive) {
-    if (state.player.x !== hx || state.player.y !== hy) {
+    if (Math.floor(state.player.x) !== hx || Math.floor(state.player.y) !== hy) {
       await _autopilotMoveToTile(hx, hy);
       continue;
     }
@@ -314,6 +305,7 @@ function stopSellAutopilot(reason) {
     Input.setAutopilotBlocked(false);
     Input.clearHeldKeys();
   }
+  if (typeof WS !== 'undefined' && WS.send) WS.send({ type: 'move', fwd: 0, turn: 0 });
   const banner = document.getElementById('autopilot-banner');
   if (banner) banner.style.display = 'none';
   if (state._soldWaiter) {
@@ -1086,7 +1078,6 @@ window.addEventListener('load', () => {
     const canvas = document.getElementById('game');
     Renderer.init(canvas, state);
     Input.init(msg => {
-      if (msg.type === 'move' && msg.dir) state.facing = msg.dir;
       WS.send(msg);
     }, handleKey);
 
@@ -1130,7 +1121,9 @@ window.addEventListener('load', () => {
       const prevSelf = state._prevSelfPos;
       state.player  = msg.player;
       if (uname) state.player.username = uname;
-      if (prevSelf) {
+      if (state.player.angle != null && Number.isFinite(state.player.angle)) {
+        state.facing = _facingFromAngle(state.player.angle);
+      } else if (prevSelf) {
         const f = _facingFromDelta(state.player.x - prevSelf.x, state.player.y - prevSelf.y);
         if (f) state.facing = f;
       }
@@ -1138,10 +1131,14 @@ window.addEventListener('load', () => {
 
       for (const pl of msg.players) {
         if (state.player && pl.id === state.player.id) continue;
-        const pr = state._prevOtherPos[pl.id];
-        if (pr) {
-          const f = _facingFromDelta(pl.x - pr.x, pl.y - pr.y);
-          if (f) state._otherFacing[pl.id] = f;
+        if (pl.angle != null && Number.isFinite(pl.angle)) {
+          state._otherFacing[pl.id] = _facingFromAngle(pl.angle);
+        } else {
+          const pr = state._prevOtherPos[pl.id];
+          if (pr) {
+            const f = _facingFromDelta(pl.x - pr.x, pl.y - pr.y);
+            if (f) state._otherFacing[pl.id] = f;
+          }
         }
         state._prevOtherPos[pl.id] = { x: pl.x, y: pl.y };
       }
@@ -1157,8 +1154,6 @@ window.addEventListener('load', () => {
       state.crops   = msg.crops  || [];
       state.prices  = msg.prices;
       state.season  = msg.season;
-      const flatMult = state.player.flat_tire ? 3.0 : 1.0;
-      Input.setSpeedMult(_loadSpeedMult(state.player) * flatMult);
       _checkTownCrossing();
       // Cancel parcel preview if player moved off that parcel
       if (state.parcelPreview !== null) {

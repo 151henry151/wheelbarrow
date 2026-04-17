@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-04-17
+
+### Added
+- **Server** (`server/game/movement.py`): **continuous movement** — float `x`/`y`, heading **`angle`**, tank controls via `_input_fwd` / `_input_turn`; terrain and load speed on server; wheel wear accumulates per ~1 tile travelled
+- **Server** (`server/db/queries.py`): **`ensure_player_movement_columns()`** — add **`angle`** and widen **`x`/`y`** to **DOUBLE** when missing (existing DBs)
+- **DB** (`db/migration_0_11_continuous_movement.sql`, `db/init.sql`): **`angle`** column; **DOUBLE** positions for new installs
+
+### Changed
+- **Server** (`server/game/engine.py`): **`move`** WebSocket message uses **`fwd`** and **`turn`** (-1…1); physics integrated each **tick**; tile-scoped actions use **`player_tile_xy()`**; **`fill_water`** / **`bridge_deposit`** infer cardinal from **`angle`** when **`dir`** omitted
+- **Client** (`client/js/input.js`): **Up/Down** = forward/back, **Left/Right** = **rotate** (no strafe); input sampled every **50ms**
+- **Client** (`client/js/game.js`, `client/js/renderer.js`): **`angle`** for wheelbarrow **yaw**; facing hints from **`_facingFromAngle`**; **sell autopilot** steers with **fwd/turn** toward tile center
+- **Client** (`client/js/renderer.js`): **roads** use nearly **full-tile** slabs (**`T - 0.5`**); **quarter-cylinder** fillets at **inner L junctions** (three road neighbors, missing diagonal)
+
 ## [0.10.5] - 2026-04-17
 
 ### Added

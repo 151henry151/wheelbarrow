@@ -9,6 +9,7 @@ towns have polygon boundaries; transactions carry town taxes.
 import asyncio
 import datetime
 import json
+import logging
 import math
 import random
 import time
@@ -34,7 +35,6 @@ from server.game.constants import (
 )
 from server.game.seasons import SeasonClock
 from server.game.wb_condition import (
-    apply_move_decay,
     effective_bucket_cap,
     trim_bucket_to_effective_cap,
 )
@@ -45,6 +45,11 @@ from server.game.town_npcs import (
     DISTRICT_KEYS,
 )
 from server.game.roads_util import path_union_for_sites, pick_adjacent_growth_tile
+from server.game.movement import (
+    integrate_player_movement,
+    player_tile_xy,
+    angle_to_cardinal_dir,
+)
 from server.game.construction import (
     init_construction_state,
     deposit_all_from_bucket,
@@ -53,6 +58,7 @@ from server.game.construction import (
     building_remaining,
 )
 from server.db import queries
+from server.config import settings
 
 
 def _bucket_total(bucket: dict) -> float:
@@ -103,7 +109,7 @@ def _near_shop(player: dict, shop_key: str, towns: dict[int, dict]) -> bool:
 
 
 def _at_any_npc_market(player: dict, towns: dict[int, dict]) -> bool:
-    px, py = player["x"], player["y"]
+    px, py = player_tile_xy(player)
     for town in towns.values():
         d = town.get("npc_district") or {}
         m = d.get("market")
@@ -166,6 +172,7 @@ class GameEngine:
     # ------------------------------------------------------------------ load
 
     async def load(self):
+        await queries.ensure_player_movement_columns()
         await queries.ensure_resource_nodes_tree_variant()
         # World generation first (no-op if already done)
         from server.game.world_gen import generate_world_if_needed
@@ -432,7 +439,8 @@ class GameEngine:
     # ---------------------------------------------------------------- helpers
 
     def _get_player_parcel(self, player: dict) -> Optional[dict]:
-        pid = self.parcel_at.get((player["x"], player["y"]))
+        tx, ty = player_tile_xy(player)
+        pid = self.parcel_at.get((tx, ty))
         return self.world_parcels.get(pid) if pid else None
 
     def _parcel_owning_tile(self, x: int, y: int) -> Optional[dict]:
@@ -444,7 +452,7 @@ class GameEngine:
 
     def _get_player_town(self, player: dict) -> Optional[dict]:
         """Return the town the player is currently in, or None."""
-        x, y = player["x"], player["y"]
+        x, y = float(player["x"]), float(player["y"])
         for town in self.towns.values():
             if _point_in_polygon(x, y, town["boundary"]):
                 return town
@@ -489,6 +497,11 @@ class GameEngine:
         player["bucket_cap"] = WB_BUCKET_CAP.get(player["wb_bucket_level"], 10)
         _migrate_pocket_fertilizer_to_bucket(player)
         trim_bucket_to_effective_cap(player)
+        player["x"] = float(player.get("x", 500))
+        player["y"] = float(player.get("y", 500))
+        player.setdefault("angle", float(player.get("angle", math.pi / 2)))
+        player["_input_fwd"] = 0.0
+        player["_input_turn"] = 0.0
         self.players[player["id"]] = player
         return token
 
@@ -509,7 +522,13 @@ class GameEngine:
 
     async def handle_input(self, player_id: int, msg: dict):
         t = msg.get("type")
-        if   t == "move":           self._move(player_id, msg.get("dir"))
+        if t == "move":
+            pl = self.players.get(player_id)
+            if pl:
+                pl["_input_fwd"] = float(msg.get("fwd", 0) or 0)
+                pl["_input_turn"] = float(msg.get("turn", 0) or 0)
+                pl["_input_fwd"] = max(-1.0, min(1.0, pl["_input_fwd"]))
+                pl["_input_turn"] = max(-1.0, min(1.0, pl["_input_turn"]))
         elif t == "sell":           await self._sell_npc_market(player_id)
         elif t == "buy_parcel":     await self._buy_parcel(player_id, msg.get("parcel_id"))
         elif t == "build":          await self._build(player_id, msg.get("structure_type"))
@@ -529,26 +548,22 @@ class GameEngine:
         elif t == "cancel_construction": await self._cancel_construction(player_id)
         elif t == "demolish_structure":  await self._demolish_structure(player_id)
         elif t == "improve_soil":       await self._improve_soil(player_id)
-        elif t == "fill_water":        await self._fill_water(player_id, msg.get("dir"))
-        elif t == "bridge_deposit":    await self._bridge_deposit(player_id, msg.get("dir"))
+        elif t == "fill_water":
+            pl = self.players.get(player_id)
+            d = msg.get("dir")
+            if not d and pl:
+                d = angle_to_cardinal_dir(float(pl.get("angle", 0)))
+            await self._fill_water(player_id, d)
+        elif t == "bridge_deposit":
+            pl = self.players.get(player_id)
+            d = msg.get("dir")
+            if not d and pl:
+                d = angle_to_cardinal_dir(float(pl.get("angle", 0)))
+            await self._bridge_deposit(player_id, d)
 
-    # ---- movement -----------------------------------------------------------
+    # ---- movement (continuous; integrate_player_movement in tick) ----------
 
-    def _move(self, player_id: int, direction: str):
-        player = self.players.get(player_id)
-        if not player:
-            return
-        dx, dy = {"up": (0,-1), "down": (0,1), "left": (-1,0), "right": (1,0)}.get(direction, (0,0))
-        if dx == 0 and dy == 0:
-            return
-        nx, ny = player["x"] + dx, player["y"] + dy
-        if not (0 <= nx < WORLD_W and 0 <= ny < WORLD_H):
-            return
-        if not self._terrain_allows_move(nx, ny):
-            asyncio.ensure_future(self._send(player_id, {"type": "notice", "msg": "Water blocks the way — fill it on your land ([L]) or build a bridge ([J]) over it."}))
-            return
-        player["x"], player["y"] = nx, ny
-        events = apply_move_decay(player)
+    def _dispatch_wb_move_events(self, player_id: int, events: list[str]) -> None:
         for ev in events:
             if ev == "flat_tire":
                 asyncio.ensure_future(self._send(player_id, {"type": "notice",
@@ -597,7 +612,7 @@ class GameEngine:
             await self._send(player_id, {"type": "notice", "msg": "That parcel is already owned."})
             return
         # Player must be standing on the parcel
-        if self.parcel_at.get((player["x"], player["y"])) != parcel_id:
+        if self.parcel_at.get(player_tile_xy(player)) != parcel_id:
             await self._send(player_id, {"type": "notice", "msg": "Stand on the parcel to buy it."})
             return
         if player["coins"] < parcel["price"]:
@@ -637,7 +652,7 @@ class GameEngine:
                     "msg": f"Building {structure_type} is banned in {town.get('custom_name') or town['name']}."})
                 return
 
-        tx, ty = player["x"], player["y"]
+        tx, ty = player_tile_xy(player)
         if (tx, ty) in self.water_tiles:
             await self._send(player_id, {"type": "notice", "msg": "Can't build on water — fill it or bridge it first."})
             return
@@ -682,7 +697,7 @@ class GameEngine:
         player = self.players.get(player_id)
         if not player:
             return
-        tx, ty = player["x"], player["y"]
+        tx, ty = player_tile_xy(player)
         node = next(
             (n for n in self.structures.values() if n["x"] == tx and n["y"] == ty),
             None,
@@ -779,7 +794,7 @@ class GameEngine:
         player = self.players.get(player_id)
         if not player:
             return
-        tx, ty = player["x"], player["y"]
+        tx, ty = player_tile_xy(player)
         node = next((n for n in self.structures.values() if n["x"] == tx and n["y"] == ty), None)
         if not node or not node.get("construction_active"):
             await self._send(player_id, {"type": "notice", "msg": "No active construction site here."})
@@ -803,7 +818,7 @@ class GameEngine:
         player = self.players.get(player_id)
         if not player:
             return
-        tx, ty = player["x"], player["y"]
+        tx, ty = player_tile_xy(player)
         node = next((n for n in self.structures.values() if n["x"] == tx and n["y"] == ty), None)
         if not node:
             await self._send(player_id, {"type": "notice", "msg": "Nothing built here."})
@@ -858,7 +873,7 @@ class GameEngine:
         player = self.players.get(player_id)
         if not player:
             return
-        tx, ty = player["x"], player["y"]
+        tx, ty = player_tile_xy(player)
         parcel = self._get_player_parcel(player)
         if not parcel or parcel.get("owner_id") != player_id:
             await self._send(player_id, {"type": "notice", "msg": "Stand on your own land to improve soil."})
@@ -883,8 +898,8 @@ class GameEngine:
         if not player:
             return
         dx, dy = _dir_offset(direction or "down")
-        px, py = player["x"], player["y"]
-        wx, wy = px + dx, py + dy
+        px, py = float(player["x"]), float(player["y"])
+        wx, wy = int(math.floor(px + dx)), int(math.floor(py + dy))
         parcel = self._get_player_parcel(player)
         if not parcel or parcel.get("owner_id") != player_id:
             await self._send(player_id, {"type": "notice", "msg": "Stand on your own land to landfill water next to you."})
@@ -913,8 +928,8 @@ class GameEngine:
         if not player:
             return
         dx, dy = _dir_offset(direction or "down")
-        px, py = player["x"], player["y"]
-        wx, wy = px + dx, py + dy
+        px, py = float(player["x"]), float(player["y"])
+        wx, wy = int(math.floor(px + dx)), int(math.floor(py + dy))
         if (wx, wy) not in self.water_tiles:
             await self._send(player_id, {"type": "notice", "msg": "No water in that direction."})
             return
@@ -970,7 +985,7 @@ class GameEngine:
         player = self.players.get(player_id)
         if not player:
             return
-        tx, ty = player["x"], player["y"]
+        tx, ty = player_tile_xy(player)
         node = next(
             (n for n in self.structures.values()
              if n.get("is_silo") and n["x"] == tx and n["y"] == ty and not n.get("construction_active")),
@@ -1010,7 +1025,7 @@ class GameEngine:
         if not bucket:
             await self._send(player_id, {"type": "notice", "msg": "Bucket is empty."})
             return
-        tx, ty = player["x"], player["y"]
+        tx, ty = player_tile_xy(player)
         silo = next(
             (
                 n
@@ -1077,7 +1092,7 @@ class GameEngine:
         player = self.players.get(player_id)
         if not player:
             return
-        key  = (player["x"], player["y"])
+        key  = player_tile_xy(player)
         pile = self.piles.get(key, {}).get(resource_type)
         if not pile or pile.get("owner_id") != player_id:
             await self._send(player_id, {"type": "notice", "msg": "No pile of that type here that you own."})
@@ -1104,7 +1119,7 @@ class GameEngine:
         player = self.players.get(player_id)
         if not player:
             return
-        key   = (player["x"], player["y"])
+        key   = player_tile_xy(player)
         pile  = self.piles.get(key, {}).get(resource_type)
         if not pile or pile.get("sell_price") is None:
             await self._send(player_id, {"type": "notice", "msg": "No priced pile here."})
@@ -1274,7 +1289,7 @@ class GameEngine:
         player = self.players.get(player_id)
         if not player:
             return
-        tx, ty  = player["x"], player["y"]
+        tx, ty = player_tile_xy(player)
         parcel  = self._get_player_parcel(player)
         crop    = self.crops.get((tx, ty))
         now_utc = datetime.datetime.utcnow()
@@ -1446,7 +1461,7 @@ class GameEngine:
         player = self.players.get(player_id)
         if not player or not isinstance(prices, dict):
             return
-        tx, ty = player["x"], player["y"]
+        tx, ty = player_tile_xy(player)
         node   = next((n for n in self.structures.values()
                        if n.get("is_market") and n["x"] == tx and n["y"] == ty
                        and n["owner_id"] == player_id), None)
@@ -1461,7 +1476,7 @@ class GameEngine:
         player = self.players.get(player_id)
         if not player:
             return
-        tx, ty = player["x"], player["y"]
+        tx, ty = player_tile_xy(player)
         node   = next((n for n in self.structures.values()
                        if n.get("is_market") and abs(n["x"]-tx)<=1 and abs(n["y"]-ty)<=1), None)
         if not node:
@@ -1646,6 +1661,16 @@ class GameEngine:
 
     async def tick(self, resource_tick_s: int, persist_interval_s: int):
         now = time.monotonic()
+        dt = settings.game_tick_ms / 1000.0
+        for pid in list(self.sockets.keys()):
+            pl = self.players.get(pid)
+            if not pl:
+                continue
+            try:
+                ev = integrate_player_movement(pl, dt, self.water_tiles)
+                self._dispatch_wb_move_events(pid, ev)
+            except Exception:
+                logging.exception("integrate_player_movement")
 
         prev_season = self.season.season
         if self.season.tick():
@@ -1700,7 +1725,8 @@ class GameEngine:
         for player in self.players.values():
             if player["id"] not in self.sockets:
                 continue
-            px, py = player["x"], player["y"]
+            px, py = float(player["x"]), float(player["y"])
+            ptx, pty = player_tile_xy(player)
             cap   = effective_bucket_cap(player)
             load  = _bucket_total(player.get("bucket", {}))
             space = cap - load
@@ -1712,7 +1738,7 @@ class GameEngine:
                 rem = float(pl.get("remaining", 0))
                 if rem <= 0:
                     continue
-                if player["x"] != pl["x"] or player["y"] != pl["y"]:
+                if ptx != pl["x"] or pty != pl["y"]:
                     new_pending.append(pl)
                     continue
                 load = _bucket_total(player.get("bucket", {}))
@@ -1737,7 +1763,7 @@ class GameEngine:
 
             load = _bucket_total(player.get("bucket", {}))
             space = cap - load
-            pile_map = self.piles.get((px, py))
+            pile_map = self.piles.get((ptx, pty))
             if pile_map and space > 0:
                 for rtype, pile in list(pile_map.items()):
                     if not self._player_can_free_pick_pile(player, pile):
@@ -1832,6 +1858,7 @@ class GameEngine:
         """Other clients only need wheelbarrows for players with an active WebSocket."""
         return [
             {"id": p["id"], "username": p["username"], "x": p["x"], "y": p["y"],
+             "angle": float(p.get("angle", 0)),
              "flat_tire": p.get("flat_tire", 0),
              "wb_paint": round(p.get("wb_paint", 100), 1)}
             for p in self.players.values() if p["id"] in self.sockets
@@ -1911,7 +1938,7 @@ class GameEngine:
     def _player_wire(self, p: dict) -> dict:
         eff = effective_bucket_cap(p)
         return {
-            "id": p["id"], "x": p["x"], "y": p["y"],
+            "id": p["id"], "x": p["x"], "y": p["y"], "angle": float(p.get("angle", 0)),
             "coins": p["coins"], "bucket": p.get("bucket", {}),
             "bucket_cap": p["bucket_cap"],
             "bucket_cap_effective": eff,

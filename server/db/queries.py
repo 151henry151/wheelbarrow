@@ -7,6 +7,31 @@ from server.db.connection import get_pool
 # Auth / Players
 # ---------------------------------------------------------------------------
 
+async def ensure_player_movement_columns():
+    """v0.11.0: float x/y + angle for continuous movement (idempotent)."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT COLUMN_NAME FROM information_schema.COLUMNS "
+                "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'players' AND COLUMN_NAME = 'angle'",
+            )
+            if not await cur.fetchone():
+                await cur.execute(
+                    "ALTER TABLE players ADD COLUMN angle DOUBLE NOT NULL DEFAULT 1.5707963267948966",
+                )
+            await cur.execute(
+                "SELECT DATA_TYPE FROM information_schema.COLUMNS "
+                "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'players' AND COLUMN_NAME = 'x'",
+            )
+            row = await cur.fetchone()
+            if row and row[0] and str(row[0]).lower() in (
+                "int", "mediumint", "bigint", "smallint", "tinyint",
+            ):
+                await cur.execute("ALTER TABLE players MODIFY COLUMN x DOUBLE NOT NULL DEFAULT 500")
+                await cur.execute("ALTER TABLE players MODIFY COLUMN y DOUBLE NOT NULL DEFAULT 500")
+
+
 async def login_or_register(username: str, password: str) -> dict | None:
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -29,6 +54,9 @@ async def login_or_register(username: str, password: str) -> dict | None:
                     return None
             row["bucket"] = json.loads(row["bucket"]) if isinstance(row["bucket"], str) else (row["bucket"] or {})
             row["pocket"] = json.loads(row["pocket"]) if isinstance(row["pocket"], str) else (row["pocket"] or {})
+            row["x"] = float(row["x"])
+            row["y"] = float(row["y"])
+            row["angle"] = float(row["angle"]) if row.get("angle") is not None else 1.5707963267948966
             return row
 
 
@@ -38,12 +66,12 @@ async def save_player(player: dict):
         async with conn.cursor() as cur:
             await cur.execute(
                 """UPDATE players
-                   SET coins=%s, x=%s, y=%s, bucket=%s, bucket_cap=%s, pocket=%s,
+                   SET coins=%s, x=%s, y=%s, angle=%s, bucket=%s, bucket_cap=%s, pocket=%s,
                        wb_paint=%s, wb_tire=%s, wb_handle=%s, wb_barrow=%s, flat_tire=%s,
                        wb_bucket_level=%s, wb_tire_level=%s, wb_handle_level=%s, wb_barrow_level=%s,
                        last_seen=NOW()
                    WHERE id=%s""",
-                (player["coins"], player["x"], player["y"],
+                (player["coins"], player["x"], player["y"], player.get("angle", 1.5707963267948966),
                  json.dumps(player.get("bucket", {})), player["bucket_cap"],
                  json.dumps(player.get("pocket", {})),
                  player.get("wb_paint", 100), player.get("wb_tire", 100),

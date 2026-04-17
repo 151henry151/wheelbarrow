@@ -1,0 +1,4 @@
+-- v0.11.0 — float player position + heading angle (continuous movement)
+ALTER TABLE players MODIFY COLUMN x DOUBLE DEFAULT 500;
+ALTER TABLE players MODIFY COLUMN y DOUBLE DEFAULT 500;
+ALTER TABLE players ADD COLUMN angle DOUBLE DEFAULT 1.5707963267948966;
