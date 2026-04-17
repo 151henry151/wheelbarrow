@@ -53,6 +53,34 @@ const Renderer = (() => {
   }
 
   // ── Ground tiles ────────────────────────────────────────────────────────────
+  /** Smooth grass color (no checkerboard); low-frequency variation hides tile seams. */
+  function _fieldGrassRgb(tx, ty) {
+    const fx = tx * 0.17;
+    const fy = ty * 0.21;
+    const n =
+      Math.sin(fx + fy * 0.73) * 0.42 +
+      Math.cos(fx * 0.65 - fy * 0.88) * 0.36 +
+      Math.sin((tx + ty) * 0.095) * 0.28;
+    const t = (n + 1.06) / 2.12;
+    return {
+      r: Math.round(46 + t * 14),
+      g: Math.round(68 + t * 16),
+      b: Math.round(38 + t * 12),
+    };
+  }
+
+  function _rgbObj(o) {
+    return `rgb(${o.r},${o.g},${o.b})`;
+  }
+
+  function _fieldGrassShade(o, dr, dg, db) {
+    return {
+      r: Math.max(0, Math.min(255, o.r + dr)),
+      g: Math.max(0, Math.min(255, o.g + dg)),
+      b: Math.max(0, Math.min(255, o.b + db)),
+    };
+  }
+
   function _drawTiles(camX, camY, W, H) {
     const seasonName = s.season ? s.season.name : 'spring';
     const tint = SEASON_TILE_TINT[seasonName];
@@ -62,15 +90,20 @@ const Renderer = (() => {
     const sy = Math.max(0, Math.floor(camY / T));
     const ex = Math.min(wx - 1, Math.ceil((camX + W) / T));
     const ey = Math.min(wy - 1, Math.ceil((camY + H) / T));
+    ctx.imageSmoothingEnabled = true;
     for (let ty = sy; ty <= ey; ty++) {
       for (let tx = sx; tx <= ex; tx++) {
-        const h = (tx * 7 + ty * 13) & 0xff;
-        const base = (tx + ty) % 2 === 0 ? 74 : 80;
-        const r = 50 + ((h & 0x0f) >> 1);
-        const g = base + ((h >> 4) & 0x07);
-        const b = 45;
-        ctx.fillStyle = `rgb(${r},${g},${b})`;
-        ctx.fillRect(tx * T, ty * T, T, T);
+        const ox = tx * T;
+        const oy = ty * T;
+        const base = _fieldGrassRgb(tx, ty);
+        const cx = ox + T / 2 + Math.sin(ty * 0.58 + tx * 0.13) * 2.5;
+        const cy = oy + T / 2 + Math.cos(tx * 0.52 + ty * 0.11) * 2.5;
+        const g = ctx.createRadialGradient(cx, cy, T * 0.06, cx, cy, T * 0.78);
+        g.addColorStop(0, _rgbObj(_fieldGrassShade(base, 9, 13, 5)));
+        g.addColorStop(0.45, _rgbObj(base));
+        g.addColorStop(1, _rgbObj(_fieldGrassShade(base, -7, -9, -5)));
+        ctx.fillStyle = g;
+        ctx.fillRect(ox, oy, T, T);
       }
     }
     if (tint) {

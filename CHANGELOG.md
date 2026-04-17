@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.10] - 2026-04-16
+
+### Changed
+- **Client** (`client/js/renderer.js`): replace **checkerboard ground** with **smooth grass color** (low-frequency variation) and subtle **radial shading** per tile so the field blends without a visible grid
+- **Client** (`client/js/game.js`): **HUD hints** when a **resource pile** blocks tilling or planting on an owned parcel (and when a frosted crop blocks till)
+
 ## [0.9.9] - 2026-04-17
 
 ### Changed

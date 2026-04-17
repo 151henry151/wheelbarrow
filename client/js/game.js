@@ -562,13 +562,18 @@ function _updateHint() {
   const crop = state.crops.find(c => c.x === px && c.y === py);
   if (crop) {
     if (crop.winter_dead) {
+      if (pilesHere.length) {
+        hints.push('Clear pile on this tile before [F] till');
+      }
       hints.push('[F] till — clear frosted crop');
     } else {
       hints.push(crop.ready ? '[F] harvest crop'
         : '[F] fertilize (fertilizer, compost, or manure in barrow) / check crop');
     }
   } else if (parcel && parcel.owner_id === p.id) {
-    if (_poorSoilAt(px, py)) {
+    if (pilesHere.length) {
+      hints.push('Clear resource pile(s) on this tile before [F] till or plant');
+    } else if (_poorSoilAt(px, py)) {
       if ((p.bucket || {}).dirt >= 1) {
         hints.push('[I] spread 1 dirt to improve poor soil (required before tilling)');
       } else {
