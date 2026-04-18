@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.6] - 2026-04-17
+
+### Changed
+- **Client** (`client/js/renderer.js`): **Water** — fragment color is **hardcoded linear** `vec3` (no `diffuse` uniform); bias **B** over **G** so water reads **blue** after tone/color output
+- **Client** (`client/js/renderer.js`): **Lighting** — fixed **high-noon** levels: brighter **hemisphere** (sky/ground colors + intensity), **ambient**, **directional** (white, **~1.82**); **sun** Y **1250**; **toneMappingExposure** **~1.32**; **fog** base density lowered; season **no longer** dims hemi/amb/sun
+
 ## [0.12.5] - 2026-04-17
 
 ### Changed

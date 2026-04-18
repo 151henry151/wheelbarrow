@@ -14,7 +14,7 @@ const Renderer = (() => {
     winter: 0xa8b8c8,
   };
   /** Base FogExp2 density when camera pitch is mostly top-down (see `_applySeasonAtmosphere`). */
-  const FOG_DENSITY_TOPDOWN = 0.00028;
+  const FOG_DENSITY_TOPDOWN = 0.00016;
   /** Fog tints distant terrain toward horizon — keep close to sky for a natural horizon line. */
   const SEASON_FOG = {
     spring: 0x7aa8c0,
@@ -148,20 +148,17 @@ const Renderer = (() => {
     const distEase = Math.min(1.35, Math.max(0.28, DIST_MIN / Math.max(DIST_MIN, _camDist)));
     density *= distEase;
     scene.fog = new THREE.FogExp2(fg, density);
+    // Fixed “high noon” fill — do not dim by season (sky/fog tint still follow season above).
     if (hemi && amb) {
-      if (name === 'summer') {
-        hemi.intensity = 0.55;
-        amb.intensity = 0.38;
-      } else if (name === 'winter') {
-        hemi.intensity = 0.42;
-        amb.intensity = 0.5;
-      } else if (name === 'fall') {
-        hemi.intensity = 0.48;
-        amb.intensity = 0.35;
-      } else {
-        hemi.intensity = 0.52;
-        amb.intensity = 0.36;
-      }
+      hemi.color.setHex(0xd8ecff);
+      hemi.groundColor.setHex(0x98a898);
+      hemi.intensity = 0.78;
+      amb.color.setHex(0xeff6ff);
+      amb.intensity = 0.58;
+    }
+    if (sun) {
+      sun.color.setHex(0xffffff);
+      sun.intensity = 1.82;
     }
   }
 
@@ -198,14 +195,14 @@ const Renderer = (() => {
       renderer.outputColorSpace = THREE.SRGBColorSpace;
     }
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.05;
+    renderer.toneMappingExposure = 1.32;
 
-    amb = new THREE.AmbientLight(0xc8d8f0, 0.38);
+    amb = new THREE.AmbientLight(0xeff6ff, 0.58);
     scene.add(amb);
-    hemi = new THREE.HemisphereLight(0xb8d8ff, 0x4a6040, 0.5);
+    hemi = new THREE.HemisphereLight(0xd8ecff, 0x98a898, 0.78);
     scene.add(hemi);
-    sun = new THREE.DirectionalLight(0xfff5e6, 1.15);
-    sun.position.set(420, 900, 280);
+    sun = new THREE.DirectionalLight(0xffffff, 1.82);
+    sun.position.set(420, 1250, 280);
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
     sun.shadow.camera.near = 100;
@@ -252,8 +249,7 @@ const Renderer = (() => {
       'aWaterR',
       new THREE.InstancedBufferAttribute(new Float32Array(MAX_WATER * 4), 4),
     );
-    // Minimal fragment: MeshBasic’s full graph (indirect × diffuseColor, envmap, etc.) can skew hue.
-    // We discard to rounded rects, set gl_FragColor from `diffuse` only, then linearToOutputTexel.
+    // Hardcoded linear RGB in GLSL — `diffuse` uniform can still pick up wrong color management paths.
     waterMat = new THREE.MeshBasicMaterial({
       color: 0x4cb8f2,
       fog: false,
@@ -274,8 +270,6 @@ vWaterR = aWaterR;
 `,
       );
       shader.fragmentShader = `
-uniform vec3 diffuse;
-uniform float opacity;
 varying vec4 vWaterR;
 varying vec2 vUv;
 #include <common>
@@ -294,7 +288,8 @@ void main() {
   vec2 pwbW = vec2(puvW.x, -puvW.y);
   float dWaterClip = sdRoundedBox2D( pwbW, vec2(1.0), vWaterR );
   if ( dWaterClip > 0.001 ) discard;
-  gl_FragColor = vec4( diffuse, 1.0 );
+  // Linear blue: keep G < B clearly so fog/tone pipeline cannot read as olive
+  gl_FragColor = vec4( 0.08, 0.44, 0.96, 1.0 );
   #include <logdepthbuf_fragment>
   gl_FragColor = linearToOutputTexel( gl_FragColor );
 }
@@ -1335,7 +1330,7 @@ void main() {
     _applySeasonAtmosphere();
     const sunX = px * T + T / 2;
     const sunZ = py * T + T / 2;
-    sun.position.set(sunX + 420, 880, sunZ + 260);
+    sun.position.set(sunX + 320, 1250, sunZ + 220);
 
     while (dynamicRoot.children.length) {
       const ch = dynamicRoot.children[0];
