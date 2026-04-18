@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.27] - 2026-04-16
+
+### Changed
+- **Client** (`client/js/renderer.js`): **Remove** **L-corner** **quarter-cylinder** **road** **meshes** **—** **they** **rendered** **as** **vertical** **fins** **at** **some** **junctions;** **rely** **on** **overlapping** **road** **tiles** **instead**
+
 ## [0.12.26] - 2026-04-18
 
 ### Changed

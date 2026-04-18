@@ -726,34 +726,9 @@ ${sdRoundBoxFn}`,
       if (w.x < sx - 1 || w.x > ex + 1 || w.y < sy - 1 || w.y > ey + 1) continue;
       pushW(w.x, w.y);
     }
-    const roadKey = new Set((s.roads || []).map((r) => `${r.x},${r.y}`));
-    const hasR = (x, y) => roadKey.has(`${x},${y}`);
     for (const r of s.roads || []) {
       if (r.x < sx - 1 || r.x > ex + 1 || r.y < sy - 1 || r.y > ey + 1) continue;
       pushR(r.x, r.y);
-    }
-    let cornerN = 0;
-    const MAX_RC = 400;
-    for (const r of s.roads || []) {
-      if (cornerN >= MAX_RC) break;
-      const tx = r.x;
-      const ty = r.y;
-      if (tx < sx - 2 || tx > ex + 2 || ty < sy - 2 || ty > ey + 2) continue;
-      if (hasR(tx + 1, ty) && hasR(tx, ty + 1) && !hasR(tx + 1, ty + 1)) {
-        const wx = (tx + 1) * T;
-        const wz = (ty + 1) * T;
-        const gy = Math.max(_groundY(tx, ty), _groundY(tx + 1, ty), _groundY(tx, ty + 1)) + 1.1;
-        const tor = new THREE.Mesh(
-          new THREE.CylinderGeometry(T * 0.42, T * 0.42, 2.0, 12, 1, false, Math.PI, Math.PI / 2),
-          roadMat,
-        );
-        tor.rotation.x = Math.PI / 2;
-        tor.position.set(wx - T * 0.5, gy, wz - T * 0.5);
-        tor.castShadow = true;
-        tor.receiveShadow = true;
-        dynamicRoot.add(tor);
-        cornerN++;
-      }
     }
     waterMesh.count = wi;
     roadMesh.count = ri;
