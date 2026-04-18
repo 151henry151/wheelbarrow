@@ -5,6 +5,8 @@
 /* global THREE, Terrain */
 const Renderer = (() => {
   const T = 32;
+  /** Water plane is larger than a tile so shader can draw fillets past |p|=1 onto grass. */
+  const WATER_QUAD_SCALE = 1.42;
 
   /** Clear-color / upper sky (distinct from grass so tilt reads as sky vs ground). */
   const SEASON_SKY = {
@@ -244,11 +246,16 @@ const Renderer = (() => {
     grassMesh.renderOrder = 0;
     groundGroup.add(grassMesh);
 
-    const waterGeo = new THREE.PlaneGeometry(T, T);
+    const waterGeo = new THREE.PlaneGeometry(T * WATER_QUAD_SCALE, T * WATER_QUAD_SCALE);
     waterGeo.rotateX(-Math.PI / 2);
     // Per-instance corner radii for IQ sdRoundBox: vec4 = (NE, SE, NW, SW) — see pushW.
     waterGeo.setAttribute(
       'aWaterR',
+      new THREE.InstancedBufferAttribute(new Float32Array(MAX_WATER * 4), 4),
+    );
+    // Inner L-vertex fillets: vec4 (NE,SE,NW,SW) — union quarter-disks past the tile corner in p-space.
+    waterGeo.setAttribute(
+      'aInnerFillet',
       new THREE.InstancedBufferAttribute(new Float32Array(MAX_WATER * 4), 4),
     );
     waterMat = new THREE.MeshBasicMaterial({
@@ -270,7 +277,9 @@ const Renderer = (() => {
         '#include <common>',
         `#include <common>
 attribute vec4 aWaterR;
+attribute vec4 aInnerFillet;
 varying vec4 vWaterR;
+varying vec4 vInnerFillet;
 varying vec2 vWaterUv;
 `,
       );
@@ -278,6 +287,7 @@ varying vec2 vWaterUv;
         '#include <uv_vertex>',
         `#include <uv_vertex>
 vWaterR = aWaterR;
+vInnerFillet = aInnerFillet;
 vWaterUv = uv;
 `,
       );
@@ -294,17 +304,36 @@ float sdRoundBox( vec2 p, vec2 b, vec4 r ) {
         '#include <clipping_planes_pars_fragment>',
         `#include <clipping_planes_pars_fragment>
 varying vec4 vWaterR;
+varying vec4 vInnerFillet;
 varying vec2 vWaterUv;
 ${sdRoundBoxFn}`,
       );
+      const wqs = WATER_QUAD_SCALE.toFixed(4);
       shader.fragmentShader = shader.fragmentShader.replace(
         '#include <clipping_planes_fragment>',
         `#include <clipping_planes_fragment>
-	// Expand fill: (1) larger half-extents dilate each tile slightly into neighbors; (2) SDF margin
-	// keeps fragments just past d=0 so quads overlap — hides grid seams (bleed onto grass is ok).
-	float wsm = 0.038;
-	vec2 puvW = (vWaterUv - 0.5) * 2.0;
+	float wsm = 0.042;
+	float wqs = ${wqs};
+	float Rf = 1.0;
+	vec2 puvW = (vWaterUv - 0.5) * 2.0 * wqs;
 	float dw = sdRoundBox( puvW, vec2( 1.028 ), vWaterR );
+	// Concave (inner) L-corners: union quarter-disks centered past the tile corner so radius matches Rc.
+	if ( vInnerFillet.x > 0.5 && puvW.x > 1.0 && puvW.y > 1.0 ) {
+		float df = length( puvW - vec2( 1.0 + Rf, 1.0 + Rf ) ) - Rf;
+		dw = min( dw, df );
+	}
+	if ( vInnerFillet.y > 0.5 && puvW.x > 1.0 && puvW.y < -1.0 ) {
+		float df = length( puvW - vec2( 1.0 + Rf, -1.0 - Rf ) ) - Rf;
+		dw = min( dw, df );
+	}
+	if ( vInnerFillet.z > 0.5 && puvW.x < -1.0 && puvW.y > 1.0 ) {
+		float df = length( puvW - vec2( -1.0 - Rf, 1.0 + Rf ) ) - Rf;
+		dw = min( dw, df );
+	}
+	if ( vInnerFillet.w > 0.5 && puvW.x < -1.0 && puvW.y < -1.0 ) {
+		float df = length( puvW - vec2( -1.0 - Rf, -1.0 - Rf ) ) - Rf;
+		dw = min( dw, df );
+	}
 	if ( dw > wsm ) discard;
 `,
       );
@@ -598,6 +627,8 @@ ${sdRoundBoxFn}`,
     const hasW = (x, y) => waterSet.has(`${x},${y}`);
     const waterRAttr = waterMesh.geometry.getAttribute('aWaterR');
     const waterRArr = waterRAttr.array;
+    const waterFilletAttr = waterMesh.geometry.getAttribute('aInnerFillet');
+    const waterFilletArr = waterFilletAttr.array;
     const pushW = (tx, ty) => {
       if (wi >= MAX_WATER) return;
       const { x, z } = _worldXZ(tx, ty);
@@ -617,9 +648,9 @@ ${sdRoundBoxFn}`,
       // Max corner radius in IQ sdRoundBox (shader uses half-extents b=vec2(1) in p-space). Rc=1
       // with all four corners active yields a circle for an isolated tile; outer convex pond corners
       // use full quarter-arcs. Diagonals zero r along straight shores / interior cardinals.
-      // Concave inner vertices (3 water + 1 grass around a corner) need r=0 on all three tiles.
-      // Prior rules required e.g. !seD for flat east shore, which missed wS&&!wE&&seD → left r=Rc
-      // and carved a V-notch. Symmetric (cardinal water, opposite cardinal grass, diagonal water).
+      // Concave inner vertices (3 water + 1 grass): r=0 on sdRoundBox + shader unions quarter-disk
+      // past (±1,±1) so water bleeds onto grass with radius Rf = Rc. Extra cardinal/diagonal rules
+      // avoid V-notches along straight shores.
       const Rc = 1.0;
       const rNE =
         (wN && wE) ||
@@ -659,6 +690,10 @@ ${sdRoundBoxFn}`,
       waterRArr[o + 1] = rSE;
       waterRArr[o + 2] = rNW;
       waterRArr[o + 3] = rSW;
+      waterFilletArr[o] = wN && wE && !neD ? 1 : 0;
+      waterFilletArr[o + 1] = wS && wE && !seD ? 1 : 0;
+      waterFilletArr[o + 2] = wN && wW && !nwD ? 1 : 0;
+      waterFilletArr[o + 3] = wS && wW && !swD ? 1 : 0;
       wi += 1;
     };
     const pushR = (tx, ty) => {
@@ -705,6 +740,7 @@ ${sdRoundBoxFn}`,
     roadMesh.count = ri;
     waterMesh.instanceMatrix.needsUpdate = true;
     waterRAttr.needsUpdate = true;
+    waterFilletAttr.needsUpdate = true;
     roadMesh.instanceMatrix.needsUpdate = true;
   }
 

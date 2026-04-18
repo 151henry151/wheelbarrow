@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.16] - 2026-04-17
+
+### Changed
+- **Client** (`client/js/renderer.js`): **Water** — **inner** **(concave)** **L-corners** **use** **the** **same** **radius** **as** **outer** **corners** **by** **unioning** **quarter-disk** **SDFs** **(center** **`(±(1+Rf),±(1+Rf))`,** **`Rf=1`**) **past** **each** **tile** **corner** **in** **normalized** **space** **so** **water** **bleeds** **onto** **grass** **with** **a** **rounded** **inner** **bend**
+- **Client** (`client/js/renderer.js`): **Water** — **larger** **`PlaneGeometry`** **`(T×WATER_QUAD_SCALE)`** **+** **`aInnerFillet`** **instance** **attribute** **so** **fragments** **can** **cover** **past** **`|p|=1`**
+
 ## [0.12.15] - 2026-04-17
 
 ### Changed
