@@ -346,6 +346,7 @@ class GameEngine:
         self.road_tiles |= extra
         if extra:
             await queries.insert_road_bulk(list(extra), protected=0)
+            self._invalidate_movement_blocked_cache()
 
     def _structure_footprint_tiles(self) -> set[tuple[int, int]]:
         return {(int(n["x"]), int(n["y"])) for n in self.structures.values()}
@@ -437,6 +438,7 @@ class GameEngine:
             added.append(ntile)
         if added:
             await queries.insert_road_bulk(added)
+            self._invalidate_movement_blocked_cache()
 
     def _player_can_free_pick_pile(self, player: dict, pile: dict) -> bool:
         """Timed pickup into barrow without going through buy flow."""
@@ -465,12 +467,19 @@ class GameEngine:
         self._movement_blocked_cache = None
 
     def _movement_blocked_tiles(self) -> set[tuple[int, int]]:
-        """Tiles wheelbarrows cannot enter: nodes, structures, tiles with resource piles."""
+        """Tiles wheelbarrows cannot enter: nodes, structures, tiles with resource piles.
+
+        Node/structure cells that are also dirt roads are omitted — world gen and intra-town paths
+        often share a tile with a resource node; the path must still be walkable.
+        """
         if self._movement_blocked_cache is not None:
             return self._movement_blocked_cache
         blocked: set[tuple[int, int]] = set()
         for n in {**self.nodes, **self.structures}.values():
-            blocked.add((int(n["x"]), int(n["y"])))
+            tx, ty = int(n["x"]), int(n["y"])
+            if (tx, ty) in self.road_tiles:
+                continue
+            blocked.add((tx, ty))
         for (px, py), pmap in self.piles.items():
             if any(float(p.get("amount", 0) or 0) > 0 for p in pmap.values()):
                 blocked.add((px, py))

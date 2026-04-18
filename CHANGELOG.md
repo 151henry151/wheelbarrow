@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.50] - 2026-04-18
+
+### Fixed
+- **Server** (`server/game/engine.py`): **Omit** **node** **/** **structure** **footprints** **from** **`_movement_blocked_tiles`** **when** **the** **tile** **is** **in** **`road_tiles`** **so** **road∩node** **cells** **do** **not** **block** **movement** **along** **paths**
+- **Server** (`server/game/engine.py`): **Invalidate** **`_movement_blocked_cache`** **after** **intra-town** **road** **INSERTs** **and** **spring** **road** **growth**
+
 ## [0.12.49] - 2026-04-18
 
 ### Fixed
