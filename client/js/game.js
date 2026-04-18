@@ -1072,12 +1072,19 @@ window.addEventListener('load', () => {
     loginScreen.style.display = 'none';
     gameScreen.style.display  = 'block';
 
+    // Focus: hidden login inputs can keep focus so window never receives WASD (Firefox especially).
+    const canvas = document.getElementById('game');
+    if (document.activeElement && typeof document.activeElement.blur === 'function') {
+      document.activeElement.blur();
+    }
+    canvas.setAttribute('tabindex', '0');
+    canvas.focus({ preventScroll: true });
+
     // HUD is hidden by default
     document.getElementById('hud').style.display    = 'none';
     document.getElementById('hud-wb').style.display = 'none';
     document.getElementById('hud-toggle').textContent = '[H] hud';
 
-    const canvas = document.getElementById('game');
     Renderer.init(canvas, state);
     Input.init(msg => {
       if (msg.type === 'move' && msg.face_angle != null && state.player) {

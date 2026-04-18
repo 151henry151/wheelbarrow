@@ -11,9 +11,19 @@ const Input = (() => {
 
   const held = {};
 
-  /** Movement: arrows or WASD (lowercase keys in `held`). */
-  function _isMoveKey(key) {
+  /** Physical WASD → keys used in `held` (works when layout/char key differs, e.g. AZERTY). */
+  function _codeToWasd(code) {
+    if (code === 'KeyW') return 'w';
+    if (code === 'KeyA') return 'a';
+    if (code === 'KeyS') return 's';
+    if (code === 'KeyD') return 'd';
+    return null;
+  }
+
+  /** Movement: arrows or WASD (by character or physical key code). */
+  function _isMoveKey(key, code) {
     if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(key)) return true;
+    if (_codeToWasd(code)) return true;
     const k = key.length === 1 ? key.toLowerCase() : '';
     return k === 'w' || k === 'a' || k === 's' || k === 'd';
   }
@@ -23,19 +33,27 @@ const Input = (() => {
     onKey  = keyFn;
     window.addEventListener('keydown', e => {
       if (e.ctrlKey || e.altKey || e.metaKey) return;
-      if (_isMoveKey(e.key)) {
+      if (_isMoveKey(e.key, e.code)) {
         e.preventDefault();
         if (e.key.startsWith('Arrow')) held[e.key] = true;
-        else held[e.key.toLowerCase()] = true;
+        else {
+          const w = _codeToWasd(e.code);
+          if (w) held[w] = true;
+          else held[e.key.toLowerCase()] = true;
+        }
         return;
       }
       e.preventDefault();
       onKey && onKey(e.key);
     });
     window.addEventListener('keyup', e => {
-      if (_isMoveKey(e.key)) {
+      if (_isMoveKey(e.key, e.code)) {
         if (e.key.startsWith('Arrow')) delete held[e.key];
-        else delete held[e.key.toLowerCase()];
+        else {
+          const w = _codeToWasd(e.code);
+          if (w) delete held[w];
+          else delete held[e.key.toLowerCase()];
+        }
       } else delete held[e.key];
     });
   }

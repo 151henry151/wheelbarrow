@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.35] - 2026-04-18
+
+### Fixed
+- **Server** (`server/game/tick.py`): **Catch** **exceptions** **per** **`engine.tick`** **so** **a** **single** **failed** **tick** **does** **not** **terminate** **the** **background** **game** **loop** **(without** **loop** **`tick`** **messages** **never** **reach** **clients)**
+- **Server** (`server/game/engine.py`): **Log** **failures** **when** **sending** **`tick`** **over** **the** **WebSocket** **instead** **of** **ignoring** **them**
+- **Client** (`client/js/game.js`): **Blur** **focused** **login** **fields** **and** **focus** **the** **game** **canvas** **after** **login** **so** **arrow** **/** **WASD** **input** **is** **delivered** **reliably**
+- **Client** (`client/js/input.js`): **Map** **movement** **via** **`KeyboardEvent.code`** **`KeyW`/`KeyA`/`KeyS`/`KeyD`** **in** **addition** **to** **`key`** **characters**
+
 ## [0.12.34] - 2026-04-18
 
 ### Changed

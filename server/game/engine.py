@@ -2090,7 +2090,7 @@ class GameEngine:
                     "season":     self.season.wire(),
                 })
             except Exception:
-                pass
+                logging.exception("wheelbarrow: tick send_json failed for player %s", pid)
 
     async def _broadcast_all(self, msg: dict):
         for ws in list(self.sockets.values()):
