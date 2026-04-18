@@ -300,11 +300,11 @@ ${sdRoundBoxFn}`,
       shader.fragmentShader = shader.fragmentShader.replace(
         '#include <clipping_planes_fragment>',
         `#include <clipping_planes_fragment>
-	// Slight expansion past d=0 so adjacent per-tile rounded quads overlap — avoids thin grass seams.
-	// p is in [-1,1]^2 per tile half-extents; margin ~1.5% of half-tile in this space.
-	float wsm = 0.015;
+	// Expand fill: (1) larger half-extents dilate each tile slightly into neighbors; (2) SDF margin
+	// keeps fragments just past d=0 so quads overlap — hides grid seams (bleed onto grass is ok).
+	float wsm = 0.038;
 	vec2 puvW = (vWaterUv - 0.5) * 2.0;
-	float dw = sdRoundBox( puvW, vec2( 1.0 ), vWaterR );
+	float dw = sdRoundBox( puvW, vec2( 1.028 ), vWaterR );
 	if ( dw > wsm ) discard;
 `,
       );
@@ -617,31 +617,42 @@ ${sdRoundBoxFn}`,
       // Max corner radius in IQ sdRoundBox (shader uses half-extents b=vec2(1) in p-space). Rc=1
       // with all four corners active yields a circle for an isolated tile; outer convex pond corners
       // use full quarter-arcs. Diagonals zero r along straight shores / interior cardinals.
+      // Concave inner vertices (3 water + 1 grass around a corner) need r=0 on all three tiles.
+      // Prior rules required e.g. !seD for flat east shore, which missed wS&&!wE&&seD → left r=Rc
+      // and carved a V-notch. Symmetric (cardinal water, opposite cardinal grass, diagonal water).
       const Rc = 1.0;
       const rNE =
-        wN && wE
+        (wN && wE) ||
+        (!wN && wE && !neD) ||
+        (wN && !wE && !neD) ||
+        (wN && !wE && neD) ||
+        (!wN && wE && neD)
           ? 0
-          : (!wN && wE && !neD) || (wN && !wE && !neD)
-            ? 0
-            : Rc;
+          : Rc;
       const rSE =
-        wS && wE
+        (wS && wE) ||
+        (!wS && wE && !seD) ||
+        (wS && !wE && !seD) ||
+        (wS && !wE && seD) ||
+        (!wS && wE && seD)
           ? 0
-          : (!wS && wE && !seD) || (wS && !wE && !seD)
-            ? 0
-            : Rc;
+          : Rc;
       const rNW =
-        wN && wW
+        (wN && wW) ||
+        (!wN && wW && !nwD) ||
+        (wN && !wW && !nwD) ||
+        (wN && !wW && nwD) ||
+        (!wN && wW && nwD)
           ? 0
-          : (!wN && wW && !nwD) || (wN && !wW && !nwD)
-            ? 0
-            : Rc;
+          : Rc;
       const rSW =
-        wS && wW
+        (wS && wW) ||
+        (!wS && wW && !swD) ||
+        (wS && !wW && !swD) ||
+        (wS && !wW && swD) ||
+        (!wS && wW && swD)
           ? 0
-          : (!wS && wW && !swD) || (wS && !wW && !swD)
-            ? 0
-            : Rc;
+          : Rc;
       const o = wi * 4;
       // sdRoundBox vec4 = (NE, SE, NW, SW) — pairs (r.xy|r.zw) = east|west halves for IQ selection
       waterRArr[o] = rNE;

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.15] - 2026-04-17
+
+### Changed
+- **Client** (`client/js/renderer.js`): **Water** — **concave** **inner** **vertices** **(one** **cardinal** **grass,** **opposite** **cardinal** **water,** **diagonal** **water)** **now** **force** **`r=0`** **on** **each** **corner** **(symmetric** **NE/SE/NW/SW)** **so** **L-shaped** **ponds** **do** **not** **get** **V-notches** **from** **leftover** **`Rc`**
+- **Client** (`client/js/renderer.js`): **Water** — **stronger** **tile** **overlap** **`sdRoundBox`** **`b=vec2(1.028)`** **and** **larger** **SDF** **margin** **to** **hide** **grid** **seams** **(acceptable** **grass** **bleed)**
+
 ## [0.12.14] - 2026-04-17
 
 ### Changed
