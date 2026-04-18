@@ -2084,6 +2084,7 @@ class GameEngine:
     async def _broadcast_state(self):
         if not self.sockets:
             return
+        _bs0 = time.monotonic()
         all_players = self._connected_players_wire()
         all_structs  = [self._node_wire(n) for n in self.structures.values()]
 
@@ -2135,6 +2136,7 @@ class GameEngine:
                 },
                 pid=pid,
             )
+        logger.info("DBG broadcast_state took=%.4fs players=%d", time.monotonic() - _bs0, len(self.sockets))
 
     async def _broadcast_all(self, msg: dict):
         for pid, ws in list(self.sockets.items()):
