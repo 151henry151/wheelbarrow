@@ -255,6 +255,9 @@ const Renderer = (() => {
       color: 0x4ec8ff,
       fog: false,
       toneMapped: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+      polygonOffsetUnits: -1,
     });
     if (THREE.SRGBColorSpace !== undefined) {
       waterMat.colorSpace = THREE.SRGBColorSpace;
@@ -297,8 +300,12 @@ ${sdRoundBoxFn}`,
       shader.fragmentShader = shader.fragmentShader.replace(
         '#include <clipping_planes_fragment>',
         `#include <clipping_planes_fragment>
+	// Slight expansion past d=0 so adjacent per-tile rounded quads overlap — avoids thin grass seams.
+	// p is in [-1,1]^2 per tile half-extents; margin ~1.5% of half-tile in this space.
+	float wsm = 0.015;
 	vec2 puvW = (vWaterUv - 0.5) * 2.0;
-	if ( sdRoundBox( puvW, vec2(1.0), vWaterR ) > 0.0 ) discard;
+	float dw = sdRoundBox( puvW, vec2( 1.0 ), vWaterR );
+	if ( dw > wsm ) discard;
 `,
       );
     };

@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.13] - 2026-04-17
+
+### Changed
+- **Client** (`client/js/renderer.js`): **Water** — treat **small** **positive** **`sdRoundBox`** **distance** **as** **inside** **water** (**`WATER_SDF_MARGIN`**) so **adjacent** **tiles** **overlap** **slightly** **and** **grass** **seams** **disappear**; enable **`polygonOffset`** **on** **the** **water** **material** **to** **reduce** **z-fighting** **with** **grass**
+
 ## [0.12.12] - 2026-04-17
 
 ### Changed
