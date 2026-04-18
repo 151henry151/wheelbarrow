@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.39] - 2026-04-18
+
+### Fixed
+- **Server** (`server/game/engine.py`): **Reset** **`_last_resource_tick`** **/** **`_last_market_drift`** **/** **`_last_election_check`** **/** **`_last_persist`** **to** **`time.monotonic()`** **at** **end** **of** **`load()`** **so** **the** **first** **`tick()`** **does** **not** **treat** **the** **whole** **load** **window** **as** **one** **catch-up** **interval** **before** **broadcasting** **`tick`** **messages**
+- **Server** (`server/game/engine.py`): **Cap** **resource-tick** **`elapsed`** **at** **120s** **when** **catching** **up** **after** **long** **pauses**
+- **Server** (`server/game/engine.py`, `server/main.py`): **Remove** **`asyncio.wait_for`** **around** **WebSocket** **`send_json`** **(restore** **direct** **`await`)** **and** **remove** **`WS_SEND_TIMEOUT_S`**
+- **Server** (`server/game/tick.py`): **Re-raise** **`asyncio.CancelledError`** **from** **the** **game** **loop** **task** **so** **shutdown** **cancellation** **is** **not** **swallowed** **by** **the** **generic** **`except`**
+
 ## [0.12.38] - 2026-04-18
 
 ### Fixed

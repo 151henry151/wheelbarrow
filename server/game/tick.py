@@ -13,5 +13,7 @@ async def run_game_loop():
         await asyncio.sleep(settings.game_tick_ms / 1000)
         try:
             await engine.tick(settings.resource_tick_s, settings.persist_interval_s)
+        except asyncio.CancelledError:
+            raise
         except Exception:
             logger.exception("wheelbarrow: game tick failed")

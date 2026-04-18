@@ -33,7 +33,6 @@ from server.game.constants import (
     MAX_TAX_RATE, ELECTION_CYCLE_DAYS, VOTING_WINDOW_HOURS,
     VIEWPORT_RADIUS,
     VIEWPORT_WATER_RADIUS,
-    WS_SEND_TIMEOUT_S,
 )
 from server.game.seasons import SeasonClock
 from server.game.wb_condition import (
@@ -270,6 +269,15 @@ class GameEngine:
         season_row = await queries.load_season_state()
         if season_row:
             self.season.load_from_db(season_row["season"], season_row["season_start"])
+
+        # `__init__` ran before `load()`; without resetting, the first `tick()` treats the entire
+        # load duration as one resource/market/election interval and can run a huge catch-up pass
+        # before any `tick` WebSocket broadcast reaches clients.
+        _now = time.monotonic()
+        self._last_resource_tick = _now
+        self._last_market_drift = _now
+        self._last_election_check = _now
+        self._last_persist = _now
 
     def _struct_to_node(self, struct: dict) -> dict:
         sdef = STRUCTURE_DEFS.get(struct["structure_type"], {})
@@ -1838,6 +1846,8 @@ class GameEngine:
         if now - self._last_resource_tick >= resource_tick_s:
             elapsed = now - self._last_resource_tick
             self._last_resource_tick = now
+            # Avoid extreme catch-up if the process was busy or timers were skewed.
+            elapsed = min(elapsed, 120.0)
             await self._do_resource_tick(elapsed)
 
         if now - self._last_market_drift >= MARKET_DRIFT_INTERVAL:
@@ -2021,20 +2031,10 @@ class GameEngine:
         ]
 
     async def _send_json_ws_safe(self, ws: WebSocket, payload: dict, *, pid: int | None = None) -> bool:
-        """Send with timeout so one slow client cannot block the whole game loop."""
+        """Send JSON; on failure drop the socket so broadcasts do not error forever."""
         try:
-            await asyncio.wait_for(ws.send_json(payload), timeout=WS_SEND_TIMEOUT_S)
+            await ws.send_json(payload)
             return True
-        except asyncio.TimeoutError:
-            logging.warning(
-                "wheelbarrow: websocket send timed out after %ss (client likely not reading); dropping player %s",
-                WS_SEND_TIMEOUT_S,
-                pid,
-            )
-            if pid is not None:
-                self.sockets.pop(pid, None)
-            asyncio.create_task(self._close_ws_noexcept(ws))
-            return False
         except Exception:
             logging.exception("wheelbarrow: websocket send failed for player %s", pid)
             if pid is not None:
