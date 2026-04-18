@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.55] - 2026-04-18
+
+### Fixed
+- **Server** (`server/main.py`): **Coalesce** **consecutive** **WebSocket** **`move`** **messages** **to** **the** **latest** **frame** **before** **`handle_input`** **—** **when** **the** **inbound** **queue** **backs** **up,** **processing** **stale** **`move`** **frames** **in** **FIFO** **order** **could** **briefly** **set** **`_input_fwd`** **/** **`_input_turn`** **to** **older** **values** **and** **match** **stop-go** **movement** **while** **the** **camera** **still** **orbits**
+
 ## [0.12.54] - 2026-04-18
 
 ### Changed

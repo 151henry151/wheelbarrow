@@ -128,7 +128,33 @@ async def websocket_endpoint(websocket: WebSocket, token: str):
             msg = await in_q.get()
             if msg is None:
                 break
-            await handle_input_safe(msg)
+            # Coalesce consecutive `move` messages to the latest frame. At ~60 move frames/s
+            # the handler can fall behind the queue; processing stale moves before newer ones
+            # leaves _input_fwd briefly wrong and matches "stuck until next distinct input".
+            if msg.get("type") == "move":
+                disconnect = False
+                while True:
+                    try:
+                        m2 = in_q.get_nowait()
+                    except asyncio.QueueEmpty:
+                        break
+                    if m2 is None:
+                        await handle_input_safe(msg)
+                        disconnect = True
+                        break
+                    if m2.get("type") == "move":
+                        msg = m2
+                    else:
+                        await handle_input_safe(msg)
+                        await handle_input_safe(m2)
+                        msg = None
+                        break
+                if disconnect:
+                    break
+                if msg is not None:
+                    await handle_input_safe(msg)
+            else:
+                await handle_input_safe(msg)
             await asyncio.sleep(0)
     except WebSocketDisconnect:
         pass
