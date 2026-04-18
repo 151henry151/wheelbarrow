@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.23] - 2026-04-18
+
+### Changed
+- **Client** (`client/js/renderer.js`): **Simplify** **wheelbarrow** **to** **a** **classic** **V-frame** **—** **two** **straight** **wood** **rails** **(narrow** **at** **the** **axle,** **wider** **at** **the** **handles)** **with** **inline** **rounded** **ends;** **remove** **cross-braces** **under** **the** **bucket,** **perpendicular** **grip** **cylinders,** **straps,** **lug** **bolts,** **and** **rim** **beads;** **single** **front** **nose** **brace,** **open** **bucket,** **one** **sloped** **front** **lip,** **metal** **legs** **with** **a** **cross-brace**
+
 ## [0.12.22] - 2026-04-18
 
 ### Changed

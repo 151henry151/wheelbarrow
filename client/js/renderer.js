@@ -1315,10 +1315,8 @@ ${sdRoundBoxFn}`,
   }
 
   /**
-   * Single-wheel contractor wheelbarrow (+Z = forward / wheel). Structure:
-   * — Wood side rails diverge slightly toward handles (classic spread grips).
-   * — Open steel tray: sloped floor + left/right/back walls + front lip over the tire (readable U from most angles).
-   * — Axle, tire, rear legs with feet.
+   * Classic single-wheel barrow (+Z forward): two straight wood rails in a V (narrow at axle, wide at
+   * handles), open bucket on top, metal legs, wheel + axle — minimal parts.
    */
   function _wheelbarrow3d(grp, colorHex, flatTire, loadFrac, facingOrAngle, label) {
     while (grp.children.length) {
@@ -1335,22 +1333,20 @@ ${sdRoundBoxFn}`,
     }
     const paint = new THREE.Color(colorHex);
     const yaw = _yawFromFacingOrAngle(facingOrAngle);
-    const wood = new THREE.MeshLambertMaterial({ color: 0x4a3424 });
-    const woodLight = new THREE.MeshLambertMaterial({ color: 0x6a4e38 });
+    const wood = new THREE.MeshLambertMaterial({ color: 0x5c4330 });
+    const woodEnd = new THREE.MeshLambertMaterial({ color: 0x6b5240 });
     const steel = new THREE.MeshLambertMaterial({ color: paint });
-    const steelDark = new THREE.MeshLambertMaterial({ color: paint.clone().multiplyScalar(0.72) });
-    const steelRim = new THREE.MeshLambertMaterial({ color: paint.clone().multiplyScalar(0.9) });
+    const steelDark = new THREE.MeshLambertMaterial({ color: paint.clone().multiplyScalar(0.75) });
+    const steelRim = new THREE.MeshLambertMaterial({ color: paint.clone().multiplyScalar(0.92) });
     const rubber = new THREE.MeshLambertMaterial({ color: flatTire ? 0x6a2028 : 0x101010 });
-    const rimMetal = new THREE.MeshLambertMaterial({ color: 0x5c6064 });
-    const legCap = new THREE.MeshLambertMaterial({ color: 0x353330 });
+    const rimMetal = new THREE.MeshLambertMaterial({ color: 0x4a4d52 });
 
-    const wheelR = flatTire ? 6.2 : 8.2;
-    const wheelW = 3.4;
-    const axleZ = 20.5;
+    const wheelR = flatTire ? 6.2 : 8.0;
+    const wheelW = 3.2;
+    const axleZ = 20;
     const axleY = wheelR;
 
-    // ----- Wheel (rolls in X; cross-section YZ) -----
-    const tire = new THREE.Mesh(new THREE.CylinderGeometry(wheelR, wheelR, wheelW, 36), rubber);
+    const tire = new THREE.Mesh(new THREE.CylinderGeometry(wheelR, wheelR, wheelW, 28), rubber);
     tire.rotation.z = Math.PI / 2;
     tire.position.set(0, axleY, axleZ);
     tire.castShadow = true;
@@ -1358,154 +1354,105 @@ ${sdRoundBoxFn}`,
     grp.add(tire);
 
     const hub = new THREE.Mesh(
-      new THREE.CylinderGeometry(wheelR * 0.28, wheelR * 0.28, wheelW + 0.6, 20),
+      new THREE.CylinderGeometry(wheelR * 0.26, wheelR * 0.26, wheelW + 0.5, 16),
       rimMetal,
     );
     hub.rotation.z = Math.PI / 2;
     hub.position.set(0, axleY, axleZ);
     grp.add(hub);
 
-    const axle = new THREE.Mesh(new THREE.CylinderGeometry(1.0, 1.0, 28, 12), rimMetal);
+    const axle = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 0.9, 26, 10), rimMetal);
     axle.rotation.z = Math.PI / 2;
     axle.position.set(0, axleY, axleZ);
     axle.castShadow = true;
     grp.add(axle);
 
-    for (const sx of [-1, 1]) {
-      for (let i = 0; i < 4; i++) {
-        const a = (i / 4) * Math.PI * 2;
-        const sp = new THREE.Mesh(new THREE.SphereGeometry(0.5, 8, 8), rimMetal);
-        sp.position.set(
-          sx * (wheelW * 0.5 + 0.4),
-          axleY + Math.cos(a) * wheelR * 0.52,
-          axleZ + Math.sin(a) * wheelR * 0.52,
-        );
-        grp.add(sp);
-      }
-    }
+    const nose = new THREE.Mesh(new THREE.BoxGeometry(11, 1.4, 2.2), rimMetal);
+    nose.position.set(0, axleY - 1.2, 13.5);
+    nose.castShadow = true;
+    grp.add(nose);
 
-    // ----- Rails: long beams, yaw outward at rear so handles spread (real barrows) -----
-    const railLen = 48;
-    const railW = 2.6;
-    const railH = 3.2;
-    const railYaw = 0.13;
-    const railY = 10.8;
-    const railZ = -4;
+    const railW = 2.5;
+    const railH = 2.9;
+    const railY = 10.5;
+    const fz = 12.5;
+    const bz = -30;
     for (const sx of [-1, 1]) {
-      const rail = new THREE.Mesh(new THREE.BoxGeometry(railW, railH, railLen), wood);
-      rail.position.set(sx * 10.2, railY, railZ);
-      rail.rotation.y = sx * railYaw;
+      const fx = sx * 4.5;
+      const bx = sx * 13.0;
+      const dx = bx - fx;
+      const dz = bz - fz;
+      const len = Math.hypot(dx, dz);
+      const railYaw = Math.atan2(dx, dz);
+      const rail = new THREE.Mesh(new THREE.BoxGeometry(railW, railH, len), wood);
+      rail.position.set((fx + bx) / 2, railY, (fz + bz) / 2);
+      rail.rotation.y = railYaw;
       rail.castShadow = true;
       grp.add(rail);
-      const inner = new THREE.Mesh(new THREE.BoxGeometry(1.3, 2, railLen - 6), woodLight);
-      inner.position.set(sx * 9.0, railY - 0.6, railZ);
-      inner.rotation.y = sx * railYaw;
-      grp.add(inner);
-      // Grips: short cylinders with axis along X (hand bar perpendicular to the frame)
-      const grip = new THREE.Mesh(new THREE.CylinderGeometry(1.6, 2.0, 5.5, 14), wood);
-      grip.rotation.z = Math.PI / 2;
-      grip.rotation.y = sx * 0.15;
-      grip.position.set(sx * 12.5, railY + 1.2, -30);
-      grip.castShadow = true;
-      grp.add(grip);
+      const cap = new THREE.Mesh(new THREE.SphereGeometry(1.25, 10, 10), woodEnd);
+      cap.position.set(bx, railY + 0.15, bz);
+      cap.castShadow = true;
+      grp.add(cap);
     }
 
-    // Blocks where rails meet axle line
-    for (const sx of [-1, 1]) {
-      const blk = new THREE.Mesh(new THREE.BoxGeometry(railW + 0.4, railH + 0.6, 3.5), woodLight);
-      blk.position.set(sx * 10.5, railY - 0.3, 11);
-      blk.rotation.y = sx * railYaw * 0.4;
-      grp.add(blk);
-    }
-
-    // Straps across frame
-    for (const z of [5, -5, -14]) {
-      const strap = new THREE.Mesh(new THREE.BoxGeometry(26, 1.1, 1.6), rimMetal);
-      strap.position.set(0, 12.4, z);
-      grp.add(strap);
-    }
-
-    // ----- Open tub: explicit walls so bucket reads as a container from any angle -----
     const tz = -4;
-    const floorTh = 1.5;
-    const wallH = 8.5;
-    const wallT = 1.7;
-    const tubW = 19;
-    const tubD = 25;
+    const tubD = 24;
+    const tubW = 18;
+    const wallH = 7.5;
+    const wallT = 1.5;
 
-    const floor = new THREE.Mesh(new THREE.BoxGeometry(tubW - 1, floorTh, tubD), steelDark);
-    floor.rotation.x = 0.14;
-    floor.position.set(0, 14.2, tz);
+    const floor = new THREE.Mesh(new THREE.BoxGeometry(tubW - 0.5, 1.4, tubD), steelDark);
+    floor.rotation.x = 0.12;
+    floor.position.set(0, 14.0, tz);
     floor.castShadow = true;
     grp.add(floor);
 
     for (const sx of [-1, 1]) {
-      const side = new THREE.Mesh(new THREE.BoxGeometry(wallT, wallH, tubD - 0.5), steel);
-      side.position.set(sx * (tubW * 0.5 - wallT * 0.45), 18.6, tz);
+      const side = new THREE.Mesh(new THREE.BoxGeometry(wallT, wallH, tubD - 1), steel);
+      side.position.set(sx * (tubW * 0.5 - wallT * 0.4), 18.0, tz);
       side.castShadow = true;
       grp.add(side);
     }
 
-    const back = new THREE.Mesh(new THREE.BoxGeometry(tubW + 1.5, wallH + 1.2, wallT), steelDark);
-    back.position.set(0, 18.8, tz - tubD * 0.5 + wallT * 0.5);
+    const back = new THREE.Mesh(new THREE.BoxGeometry(tubW + 1, wallH + 0.8, wallT), steelDark);
+    back.position.set(0, 18.2, tz - tubD * 0.5 + wallT * 0.45);
     back.castShadow = true;
     grp.add(back);
 
-    // Rolled rim bead along top of side + back (simple L-strip simulation)
-    for (const sx of [-1, 1]) {
-      const bead = new THREE.Mesh(new THREE.BoxGeometry(1.2, 1.1, tubD + 1), steelRim);
-      bead.position.set(sx * (tubW * 0.5 - 0.3), 22.8, tz);
-      grp.add(bead);
-    }
-    const backBead = new THREE.Mesh(new THREE.BoxGeometry(tubW + 2, 1.2, 1.1), steelRim);
-    backBead.position.set(0, 22.8, tz - tubD * 0.5);
-    grp.add(backBead);
-
-    // Front lip: projects over wheel; lower than rim so load does not fall forward
-    const lip = new THREE.Mesh(new THREE.BoxGeometry(tubW + 0.5, 3.2, 2.2), steelRim);
-    lip.position.set(0, 20.5, tz + tubD * 0.5 - 1);
-    lip.rotation.x = -0.42;
+    const lip = new THREE.Mesh(new THREE.BoxGeometry(tubW + 0.5, 2.8, 8), steelRim);
+    lip.position.set(0, 18.5, tz + tubD * 0.5 - 3.5);
+    lip.rotation.x = -0.38;
     lip.castShadow = true;
     grp.add(lip);
-    const lipUnder = new THREE.Mesh(new THREE.BoxGeometry(tubW - 2, 2.4, 7), steel);
-    lipUnder.position.set(0, 17.2, tz + tubD * 0.5 - 4);
-    lipUnder.rotation.x = -0.35;
-    lipUnder.castShadow = true;
-    grp.add(lipUnder);
 
-    for (const z of [0, -10]) {
-      const brace = new THREE.Mesh(new THREE.BoxGeometry(22, 1.8, 2.4), woodLight);
-      brace.position.set(0, 8.8, z);
-      grp.add(brace);
-    }
-
-    // ----- Rear legs: drop from frame to ground -----
     for (const sx of [-1, 1]) {
-      const leg = new THREE.Mesh(new THREE.BoxGeometry(4, 8.5, 3.5), wood);
-      leg.position.set(sx * 11, 4.2, -17);
-      leg.rotation.z = sx * 0.12;
-      leg.rotation.y = sx * 0.1;
+      const leg = new THREE.Mesh(new THREE.BoxGeometry(2.2, 9, 1.4), rimMetal);
+      leg.position.set(sx * 7.5, 4.5, -12);
+      leg.rotation.z = sx * 0.08;
       leg.castShadow = true;
       grp.add(leg);
-      const foot = new THREE.Mesh(new THREE.BoxGeometry(5, 1.6, 4.5), legCap);
-      foot.position.set(sx * 11.5, 0.8, -17);
+      const foot = new THREE.Mesh(new THREE.BoxGeometry(3.5, 1.2, 3.2), rimMetal);
+      foot.position.set(sx * 7.8, 0.65, -12);
       foot.castShadow = true;
       grp.add(foot);
     }
+    const legBrace = new THREE.Mesh(new THREE.BoxGeometry(14, 0.9, 1.8), rimMetal);
+    legBrace.position.set(0, 2.2, -12);
+    grp.add(legBrace);
 
     if (loadFrac > 0.02) {
       const load = new THREE.Mesh(
-        new THREE.BoxGeometry(tubW - 5, 6.5 * loadFrac, tubD - 8),
+        new THREE.BoxGeometry(tubW - 4, 6 * loadFrac, tubD - 7),
         new THREE.MeshLambertMaterial({ color: 0x88d050, transparent: true, opacity: 0.88 }),
       );
-      load.position.set(0, 16.5 + 3 * loadFrac, tz - 1);
+      load.position.set(0, 15.5 + 2.8 * loadFrac, tz - 1);
       grp.add(load);
     }
 
     grp.rotation.y = yaw;
     if (label && grp.userData.wx != null) {
       const gyy = grp.userData.gy != null ? grp.userData.gy : 0;
-      _spriteText(label, grp.userData.wx, gyy + 46, grp.userData.wz, 0xffffff, true);
+      _spriteText(label, grp.userData.wx, gyy + 44, grp.userData.wz, 0xffffff, true);
     }
   }
 
