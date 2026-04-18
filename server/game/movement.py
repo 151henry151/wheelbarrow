@@ -87,7 +87,12 @@ def _walkable_tile(
     ty: int,
     water_tiles: set[tuple[int, int]],
     bridge_tiles: set[tuple[int, int]],
+    road_tiles: set[tuple[int, int]],
 ) -> bool:
+    # Roads are always walkable. Intra-town paths (and legacy DB rows) can overlap water without a
+    # matching DELETE from water_tiles; inter-town gen removes water from road cells, but NPC paths do not.
+    if (tx, ty) in road_tiles:
+        return True
     if (tx, ty) in bridge_tiles:
         return True
     return (tx, ty) not in water_tiles
@@ -100,12 +105,13 @@ def _segment_hits_water(
     y1: float,
     water_tiles: set[tuple[int, int]],
     bridge_tiles: set[tuple[int, int]],
+    road_tiles: set[tuple[int, int]],
 ) -> bool:
     for t in (0.12, 0.35, 0.55, 0.75, 0.92):
         x = x0 + (x1 - x0) * t
         y = y0 + (y1 - y0) * t
         tx, ty = int(math.floor(x)), int(math.floor(y))
-        if not _walkable_tile(tx, ty, water_tiles, bridge_tiles):
+        if not _walkable_tile(tx, ty, water_tiles, bridge_tiles, road_tiles):
             return True
     return False
 
@@ -184,14 +190,14 @@ def integrate_player_movement(
     nx = max(0.0, min(float(WORLD_W) - 1e-7, nx))
     ny = max(0.0, min(float(WORLD_H) - 1e-7, ny))
 
-    if _segment_hits_water(ox, oy, nx, ny, water_tiles, bridge_tiles):
+    if _segment_hits_water(ox, oy, nx, ny, water_tiles, bridge_tiles, road_tiles):
         return events
     if _segment_hits_blocked(ox, oy, nx, ny, blocked_tiles):
         return events
 
     tx, ty = int(math.floor(nx)), int(math.floor(ny))
     sx, sy = int(math.floor(ox)), int(math.floor(oy))
-    if not _walkable_tile(tx, ty, water_tiles, bridge_tiles):
+    if not _walkable_tile(tx, ty, water_tiles, bridge_tiles, road_tiles):
         return events
     # Reject entering a blocked tile from another tile; allow leaving or nudging within same tile.
     if (tx, ty) in blocked_tiles and (tx, ty) != (sx, sy):

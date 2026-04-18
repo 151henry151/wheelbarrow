@@ -52,3 +52,29 @@ def test_cannot_enter_blocked_tile_from_outside() -> None:
     x0, y0 = player["x"], player["y"]
     integrate_player_movement(player, 0.2, set(), set(), blocked, set())
     assert math.isclose(player["x"], x0) and math.isclose(player["y"], y0)
+
+
+def test_road_tile_walkable_even_if_water_table_overlaps() -> None:
+    """NPC/intra-town roads may share a cell with water without a DB cleanup; movement must not freeze."""
+    tx, ty = 200, 200
+    water = {(tx, ty), (tx + 1, ty)}
+    bridges: set[tuple[int, int]] = set()
+    roads = {(tx, ty), (tx + 1, ty)}
+    blocked: set[tuple[int, int]] = set()
+
+    player = {
+        "x": float(tx) + 0.5,
+        "y": float(ty) + 0.5,
+        "angle": 0.0,
+        "_input_fwd": 1.0,
+        "_input_turn": 0.0,
+        "bucket": {},
+        "wb_bucket_level": 1,
+        "wb_barrow_level": 1,
+        "wb_handle_level": 1,
+        "flat_tire": 0,
+    }
+    x0 = player["x"]
+    ev = integrate_player_movement(player, 0.1, water, bridges, blocked, roads)
+    assert ev == []
+    assert player["x"] > x0 + 1e-6

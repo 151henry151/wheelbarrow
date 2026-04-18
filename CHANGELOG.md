@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.49] - 2026-04-18
+
+### Fixed
+- **Server** (`server/game/movement.py`): **Treat** **`world_roads`** **tiles** **as** **walkable** **before** **water** **checks** **so** **road** **cells** **that** **also** **appear** **in** **`water_tiles`** **(e.g.** **intra-town** **paths** **without** **water** **removal)** **do** **not** **block** **all** **movement**
+
+### Added
+- **Scripts** (`scripts/diagnose_tile_overlaps.py`): **Report** **`road`** **∩** **`water_tiles`** **and** **`road`** **∩** **`resource_nodes`** **counts** **(run** **inside** **`docker compose run --rm app python scripts/diagnose_tile_overlaps.py`**)**
+
 ## [0.12.48] - 2026-04-18
 
 ### Changed
