@@ -50,8 +50,12 @@ const WS = (() => {
   function on(type, fn) { handlers[type] = fn; }
 
   function send(obj) {
-    if (socket && socket.readyState === WebSocket.OPEN)
-      socket.send(JSON.stringify(obj));
+    if (!socket) return;
+    if (socket.readyState !== WebSocket.OPEN) {
+      console.warn('Wheelbarrow: WS.send skipped (readyState=', socket.readyState, ')');
+      return;
+    }
+    socket.send(JSON.stringify(obj));
   }
 
   return { connect, on, send };

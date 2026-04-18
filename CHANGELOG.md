@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.53] - 2026-04-18
+
+### Fixed
+- **Server** (`server/main.py`): **Dedicated** **`pump_outgoing`** **task** **`await out_q.get()`** **`+`** **`send_json`** **so** **`tick`** **payloads** **are** **not** **starved** **by** **the** **inbound** **`move`** **loop** **(previous** **single-task** **`asyncio.wait`** **+** **drain** **could** **delay** **or** **block** **ticks** **when** **sending** **~60** **move** **frames/s)**
+- **Server** (`server/main.py`): **Route** **`handle_input`** **error** **notices** **through** **`out_q`** **so** **only** **the** **outbound** **pump** **calls** **`send_json`**
+- **Client** (`client/js/ws.js`): **Warn** **in** **console** **when** **`send`** **is** **skipped** **because** **the** **socket** **is** **not** **OPEN**
+
 ## [0.12.52] - 2026-04-18
 
 ### Fixed

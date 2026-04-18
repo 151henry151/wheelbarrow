@@ -71,9 +71,10 @@ async def websocket_endpoint(websocket: WebSocket, token: str):
             pass
         return
 
-    # Game loop enqueues JSON via put_nowait; we send from this same task.
-    # Inbound messages are pumped into in_q so we never cancel receive_json() mid-flight:
-    # cancelling the old asyncio.wait "loser" could strand a decoded move before it was read.
+    # out_q: game loop + error notices — drained only by pump_outgoing (single sender task).
+    # in_q: client messages — main loop handles_input without competing with tick delivery.
+    # Previously one task multiplexed send+recv with asyncio.wait and drain loops; continuous
+    # move traffic (~60/s) could starve outbound so ticks never reached the browser.
     out_q: asyncio.Queue = asyncio.Queue()
     in_q: asyncio.Queue = asyncio.Queue()
 
@@ -92,7 +93,20 @@ async def websocket_endpoint(websocket: WebSocket, token: str):
             except Exception:
                 pass
 
-    pump_task = asyncio.create_task(pump_incoming())
+    async def pump_outgoing():
+        try:
+            while True:
+                payload = await out_q.get()
+                await websocket.send_json(payload)
+        except asyncio.CancelledError:
+            raise
+        except WebSocketDisconnect:
+            pass
+        except Exception:
+            logging.exception("wheelbarrow: websocket outbound send failed")
+
+    pump_in_task = asyncio.create_task(pump_incoming())
+    pump_out_task = asyncio.create_task(pump_outgoing())
 
     async def handle_input_safe(msg: dict) -> None:
         try:
@@ -100,7 +114,7 @@ async def websocket_endpoint(websocket: WebSocket, token: str):
         except Exception:
             logging.exception("handle_input failed")
             try:
-                await websocket.send_json({
+                await out_q.put({
                     "type": "notice",
                     "msg": "Server hit an error on that action — try again or refresh the page.",
                 })
@@ -111,60 +125,7 @@ async def websocket_endpoint(websocket: WebSocket, token: str):
 
     try:
         while True:
-            while True:
-                try:
-                    queued = out_q.get_nowait()
-                except asyncio.QueueEmpty:
-                    break
-                await websocket.send_json(queued)
-
-            while True:
-                try:
-                    msg = in_q.get_nowait()
-                except asyncio.QueueEmpty:
-                    break
-                if msg is None:
-                    return
-                await handle_input_safe(msg)
-                await asyncio.sleep(0)
-
-            out_task = asyncio.create_task(out_q.get())
-            in_task = asyncio.create_task(in_q.get())
-            _, pending = await asyncio.wait(
-                {out_task, in_task},
-                return_when=asyncio.FIRST_COMPLETED,
-            )
-            for p in pending:
-                p.cancel()
-            for p in pending:
-                try:
-                    await p
-                except asyncio.CancelledError:
-                    pass
-
-            payload = None
-            try:
-                payload = out_task.result()
-            except asyncio.CancelledError:
-                pass
-            except Exception:
-                logging.exception("wheelbarrow: outbound queue get failed")
-                break
-
-            if payload is not None:
-                await websocket.send_json(payload)
-                while True:
-                    try:
-                        p2 = out_q.get_nowait()
-                    except asyncio.QueueEmpty:
-                        break
-                    await websocket.send_json(p2)
-                continue
-
-            try:
-                msg = in_task.result()
-            except asyncio.CancelledError:
-                continue
+            msg = await in_q.get()
             if msg is None:
                 break
             await handle_input_safe(msg)
@@ -172,13 +133,15 @@ async def websocket_endpoint(websocket: WebSocket, token: str):
     except WebSocketDisconnect:
         pass
     finally:
-        pump_task.cancel()
-        try:
-            await pump_task
-        except asyncio.CancelledError:
-            pass
-        except Exception:
-            pass
+        pump_in_task.cancel()
+        pump_out_task.cancel()
+        for t in (pump_in_task, pump_out_task):
+            try:
+                await t
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                pass
         await engine.remove_player(player["id"])
 
 
