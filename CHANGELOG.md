@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.21] - 2026-04-18
+
+### Changed
+- **Client** (`client/js/renderer.js`): **Wheelbarrow** **mesh** — **open** **tub** **(sloped** **floor,** **left/right/back** **walls,** **rim** **beads,** **front** **lip** **+** **under** **panel** **over** **the** **wheel),** **wood** **rails** **with** **outward** **yaw** **toward** **handles,** **axle** **blocks,** **larger** **tire,** **and** **rear** **legs** **—** **so** **the** **shape** **reads** **as** **a** **classic** **single-wheel** **barrow** **from** **most** **camera** **angles**
+
 ## [0.12.20] - 2026-04-18
 
 ### Changed
