@@ -1831,9 +1831,11 @@ class GameEngine:
 
     async def tick(self, resource_tick_s: int, persist_interval_s: int):
         now = time.monotonic()
-        dt = settings.game_tick_ms / 1000.0
-        blocked_movement = self._movement_blocked_tiles()
         logger.info("DBG tick_start sockets=%s engine_id=%s", list(self.sockets.keys()), id(self))
+        dt = settings.game_tick_ms / 1000.0
+        _t0 = time.monotonic()
+        blocked_movement = self._movement_blocked_tiles()
+        logger.info("DBG blocked_tiles count=%d built_in=%.4fs", len(blocked_movement), time.monotonic() - _t0)
         for pid in list(self.sockets.keys()):
             pl = self.players.get(pid)
             if not pl:
