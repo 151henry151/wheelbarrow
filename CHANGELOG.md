@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.3] - 2026-04-17
+
+### Changed
+- **Client** (`client/js/renderer.js`): **Water** — use **`MeshBasicMaterial`** (unlit) so **HemisphereLight** ground tint does not turn blue water **dark green**; slightly brighter base blue **0x2f88d0**; **`receiveShadow: false`** (Basic does not shade)
+
 ## [0.12.2] - 2026-04-16
 
 ### Changed

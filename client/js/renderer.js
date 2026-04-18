@@ -252,15 +252,12 @@ const Renderer = (() => {
       'aWaterR',
       new THREE.InstancedBufferAttribute(new Float32Array(MAX_WATER * 4), 4),
     );
-    waterMat = new THREE.MeshPhongMaterial({
-      color: 0x1c5ca0,
-      emissive: 0x0a3058,
-      // Opaque: semi-transparent water blended ~30% grass under each tile → muddy dark green.
-      transparent: false,
-      opacity: 1.0,
-      shininess: 90,
+    // Unlit: HemisphereLight ground color (0x4a6040) tints lit Phong/Lambert upward faces green;
+    // opaque Phong water still read as murky green next to grass.
+    waterMat = new THREE.MeshBasicMaterial({
+      color: 0x2f88d0,
+      fog: false,
     });
-    waterMat.fog = false;
     waterMat.onBeforeCompile = (shader) => {
       shader.vertexShader = shader.vertexShader.replace(
         '#include <common>',
@@ -298,7 +295,7 @@ if ( dWaterClip > 0.001 ) discard;
       );
     };
     waterMesh = new THREE.InstancedMesh(waterGeo, waterMat, MAX_WATER);
-    waterMesh.receiveShadow = true;
+    waterMesh.receiveShadow = false;
     waterMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     groundGroup.add(waterMesh);
 
