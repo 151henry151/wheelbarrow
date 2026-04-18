@@ -80,6 +80,16 @@ async def websocket_endpoint(websocket: WebSocket, token: str):
 
     try:
         while True:
+            # If receive_json and out_q.get() both complete in the same turn, FIRST_COMPLETED
+            # can pick receive every time while ticks stay queued — client move spam then starves
+            # tick delivery. Flush any queued server→client payloads before waiting on input.
+            while True:
+                try:
+                    queued = out_q.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
+                await websocket.send_json(queued)
+
             out_task = asyncio.create_task(out_q.get())
             in_task = asyncio.create_task(websocket.receive_json())
             _, pending = await asyncio.wait(

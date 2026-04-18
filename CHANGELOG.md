@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.43] - 2026-04-16
+
+### Fixed
+- **Server** (`server/main.py`): **Drain** **`out_q`** **with** **`get_nowait`** **before** **each** **`asyncio.wait`** **on** **outbound** **vs** **`receive_json`** **—** **when** **both** **complete** **in** **the** **same** **scheduler** **turn** **the** **race** **could** **favor** **buffered** **move** **messages** **repeatedly** **and** **starve** **`tick`** **delivery**
+
 ## [0.12.42] - 2026-04-16
 
 ### Fixed
