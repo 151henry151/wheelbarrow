@@ -11,24 +11,22 @@ const WS = (() => {
 
     socket.addEventListener('open', () => onOpen && onOpen());
     socket.addEventListener('message', e => {
-      // Defer so the browser can keep draining the TCP/WebSocket buffer while the game runs
-      // heavy tick handlers; otherwise server send_json can block and stall all players.
-      queueMicrotask(() => {
-        let msg;
-        try {
-          msg = JSON.parse(e.data);
-        } catch (err) {
-          console.warn('Wheelbarrow: invalid WS JSON', err);
-          return;
-        }
-        const fn = handlers[msg.type];
-        if (!fn) return;
-        try {
-          fn(msg);
-        } catch (err2) {
-          console.error('Wheelbarrow: WS handler error', msg.type, err2);
-        }
-      });
+      // Process synchronously so we drain frames promptly; deferring with queueMicrotask
+      // backlog microtasks and delayed processing, which made server tick sends time out.
+      let msg;
+      try {
+        msg = JSON.parse(e.data);
+      } catch (err) {
+        console.warn('Wheelbarrow: invalid WS JSON', err);
+        return;
+      }
+      const fn = handlers[msg.type];
+      if (!fn) return;
+      try {
+        fn(msg);
+      } catch (err2) {
+        console.error('Wheelbarrow: WS handler error', msg.type, err2);
+      }
     });
     socket.addEventListener('close', () => {
       console.warn('WS disconnected');

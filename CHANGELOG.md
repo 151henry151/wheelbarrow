@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.38] - 2026-04-18
+
+### Fixed
+- **Client** (`client/js/ws.js`): **Remove** **`queueMicrotask`** **around** **`tick`** **handlers** **—** **it** **queued** **a** **growing** **microtask** **backlog** **and** **delayed** **frame** **processing,** **which** **paired** **with** **server** **send** **timeouts** **could** **drop** **the** **connection** **and** **freeze** **movement**
+
 ## [0.12.37] - 2026-04-18
 
 ### Fixed
