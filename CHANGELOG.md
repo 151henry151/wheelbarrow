@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.54] - 2026-04-18
+
+### Changed
+- **Server** (`server/game/world_gen.py`): **Restore** **pre–0.9.3** **wild** **spawn** **density** **—** **biome** **thresholds** **0.25/0.50/0.75;** **forest** **clusters** **`FOREST_CLUSTER_TARGET`** **92** **/** **`FOREST_CLUSTER_MIN_SPACING`** **13** **/** **`max_attempts`** **22000** **with** **direct** **tree** **placement** **`placed`** **≥** **4;** **grid** **`RESOURCE_GRID_STEP`** **25** **and** **`GRID_CELL_HIT_PROB`** **0.35;** **biome-only** **`_pick_resource_for_grid`** **(no** **`MINERAL_QUAD`** **sprinkle);** **`_boost_mineral_nodes`** **1.5×** **and** **biome** **mineral** **opts** **only;** **`MEADOW_COPSE_TARGET`** **0;** **starter** **nodes** **match** **the** **old** **single-tile** **shop** **ring** **layout**
+
 ## [0.12.53] - 2026-04-18
 
 ### Fixed
