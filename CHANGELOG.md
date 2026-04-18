@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.29] - 2026-04-16
+
+### Changed
+- **Client** (`client/js/terrain.js`): **Increase** **hill** **visibility** **—** **scale** **world** **Y** **from** **×12** **to** **×48,** **add** **medium-frequency** **elevation** **octave,** **clamp** **`elevationRaw`** **to** **[-1,** **1]**
+- **Server** (`server/game/terrain_elevation.py`): **Match** **client** **formula** **and** **`WORLD_Y_SCALE`**
+- **Tests** (`tests/test_terrain_elevation.py`): **Add** **checks** **for** **elevation** **field**
+
 ## [0.12.28] - 2026-04-16
 
 ### Changed
