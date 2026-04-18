@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.52] - 2026-04-18
+
+### Fixed
+- **Server** (`server/game/engine.py`): **Chunk-index** **`water_tiles`** **and** **`bridge_tiles`** **for** **viewport** **wire** **lists** **—** **stop** **full-table** **scans** **each** **`tick`** **(major** **event-loop** **stall** **after** **rivers** **/** **ponds** **scale-up)**
+- **Client** (`client/js/input.js`): **Send** **`move`** **every** **animation** **frame** **while** **keys** **are** **held** **;** **use** **`performance.now()`** **when** **`now`** **is** **not** **finite**
+
 ## [0.12.51] - 2026-04-18
 
 ### Fixed

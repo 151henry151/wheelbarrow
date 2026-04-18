@@ -109,12 +109,17 @@ const Input = (() => {
     }
     lastFwdSample = fwd;
 
+    const t = (typeof now === 'number' && Number.isFinite(now)) ? now : performance.now();
     const sig = _moveSig(msg);
     const moving = fwd !== 0 || turn !== 0;
-    const resendDue = moving && now - lastMoveSendTime >= MOVE_RESEND_MS;
-    if (sig === lastSentMoveSig && !resendDue) return;
+    // While driving, send every frame so the server always sees fresh fwd/turn (dedupe + resend
+    // alone can leave _input_fwd stale if the event loop falls behind).
+    if (!moving) {
+      const resendDue = t - lastMoveSendTime >= MOVE_RESEND_MS;
+      if (sig === lastSentMoveSig && !resendDue) return;
+    }
     lastSentMoveSig = sig;
-    lastMoveSendTime = now;
+    lastMoveSendTime = t;
     sendFn(msg);
     // Starting drive from rest: duplicate-send so a lone lost packet cannot leave _input_fwd at 0
     // while the optimistic client angle (game.js) still rotates the barrow.

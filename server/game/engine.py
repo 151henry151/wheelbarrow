@@ -188,6 +188,9 @@ class GameEngine:
         self._wild_node_chunks: dict[tuple[int, int], list[int]] = {}
         # Same for dirt roads — full scans of road_tiles each tick blocked the event loop (no WS ticks).
         self._road_chunks: dict[tuple[int, int], list[tuple[int, int]]] = {}
+        # Water / bridges — can be 10⁵+ tiles; scanning all each tick starved asyncio (no ticks / no movement).
+        self._water_chunks: dict[tuple[int, int], list[tuple[int, int]]] = {}
+        self._bridge_chunks: dict[tuple[int, int], list[tuple[int, int]]] = {}
 
     # ------------------------------------------------------------------ load
 
@@ -294,6 +297,7 @@ class GameEngine:
         self._last_persist = _now
 
         self._rebuild_road_chunk_index()
+        self._rebuild_water_bridge_chunk_indexes()
 
     def _struct_to_node(self, struct: dict) -> dict:
         sdef = STRUCTURE_DEFS.get(struct["structure_type"], {})
@@ -506,6 +510,18 @@ class GameEngine:
             ck = (rx // WILD_NODE_CHUNK, ry // WILD_NODE_CHUNK)
             chunks.setdefault(ck, []).append((rx, ry))
         self._road_chunks = chunks
+
+    def _rebuild_water_bridge_chunk_indexes(self) -> None:
+        wc: dict[tuple[int, int], list[tuple[int, int]]] = {}
+        for x, y in self.water_tiles:
+            ck = (x // WILD_NODE_CHUNK, y // WILD_NODE_CHUNK)
+            wc.setdefault(ck, []).append((x, y))
+        self._water_chunks = wc
+        bc: dict[tuple[int, int], list[tuple[int, int]]] = {}
+        for x, y in self.bridge_tiles:
+            ck = (x // WILD_NODE_CHUNK, y // WILD_NODE_CHUNK)
+            bc.setdefault(ck, []).append((x, y))
+        self._bridge_chunks = bc
 
     def _nearby_roads_wire(self, px: int, py: int) -> list[dict]:
         """Road tiles near the player for rendering — O(chunks) not O(|road_tiles|)."""
@@ -1104,6 +1120,7 @@ class GameEngine:
             del bucket["dirt"]
         self.water_tiles.discard((wx, wy))
         await queries.delete_water_tile(wx, wy)
+        self._rebuild_water_bridge_chunk_indexes()
         await queries.save_player(player)
         await self._send(player_id, {"type": "notice", "msg": "Filled in water with dirt."})
 
@@ -1156,6 +1173,7 @@ class GameEngine:
             await queries.insert_bridge_tile(wx, wy)
             await queries.delete_bridge_progress(wx, wy)
             self.bridge_progress.pop(key, None)
+            self._rebuild_water_bridge_chunk_indexes()
             await self._send(player_id, {"type": "notice", "msg": "Bridge complete — you can cross this tile."})
         else:
             await queries.upsert_bridge_progress(wx, wy, wood_dep, coins_paid)
@@ -2349,19 +2367,31 @@ class GameEngine:
 
     def _nearby_water_tiles(self, px: int, py: int) -> list[dict]:
         r = VIEWPORT_WATER_RADIUS
-        return [
-            {"x": x, "y": y}
-            for (x, y) in self.water_tiles
-            if abs(x - px) <= r and abs(y - py) <= r
-        ]
+        x0, x1 = px - r, px + r
+        y0, y1 = py - r, py + r
+        c0x, c1x = x0 // WILD_NODE_CHUNK, x1 // WILD_NODE_CHUNK
+        c0y, c1y = y0 // WILD_NODE_CHUNK, y1 // WILD_NODE_CHUNK
+        out: list[dict] = []
+        for cx in range(c0x, c1x + 1):
+            for cy in range(c0y, c1y + 1):
+                for x, y in self._water_chunks.get((cx, cy), ()):
+                    if abs(x - px) <= r and abs(y - py) <= r:
+                        out.append({"x": x, "y": y})
+        return out
 
     def _nearby_bridge_tiles(self, px: int, py: int) -> list[dict]:
         r = VIEWPORT_WATER_RADIUS
-        return [
-            {"x": x, "y": y}
-            for (x, y) in self.bridge_tiles
-            if abs(x - px) <= r and abs(y - py) <= r
-        ]
+        x0, x1 = px - r, px + r
+        y0, y1 = py - r, py + r
+        c0x, c1x = x0 // WILD_NODE_CHUNK, x1 // WILD_NODE_CHUNK
+        c0y, c1y = y0 // WILD_NODE_CHUNK, y1 // WILD_NODE_CHUNK
+        out: list[dict] = []
+        for cx in range(c0x, c1x + 1):
+            for cy in range(c0y, c1y + 1):
+                for x, y in self._bridge_chunks.get((cx, cy), ()):
+                    if abs(x - px) <= r and abs(y - py) <= r:
+                        out.append({"x": x, "y": y})
+        return out
 
     def _nearby_poor_soil_tiles(self, px: int, py: int, player_id: int) -> list[dict]:
         """Only tiles on land this player owns — used for [I] hints; not shown to others."""
