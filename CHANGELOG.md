@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.41] - 2026-04-18
+
+### Fixed
+- **Server** (`server/main.py`): **Await** **`asyncio.sleep(0)`** **after** **each** **`handle_input`** **so** **the** **game** **loop** **is** **not** **starved** **when** **the** **browser** **sends** **many** **WebSocket** **messages** **per** **second** **(movement** **looked** **dead** **because** **`tick`** **broadcasts** **were** **delayed** **by** **asyncio** **scheduling)**
+
+## [0.12.40] - 2026-04-18
+
+### Fixed
+- **Client** (`client/js/renderer.js`): **Focus** **the** **game** **canvas** **on** **each** **primary** **mousedown** **so** **keyboard** **events** **reach** **movement** **after** **focus** **moves** **to** **Firefox** **Developer** **Tools** **or** **other** **UI**
+- **Client** (`client/js/input.js`): **Clear** **held** **movement** **keys** **and** **send** **a** **zero** **move** **on** **`window` `blur`** **so** **stuck** **keys** **do** **not** **persist** **when** **switching** **away**
+
 ## [0.12.39] - 2026-04-18
 
 ### Fixed

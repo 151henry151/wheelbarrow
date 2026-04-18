@@ -31,6 +31,10 @@ const Input = (() => {
   function init(fn, keyFn) {
     sendFn = fn;
     onKey  = keyFn;
+    window.addEventListener('blur', () => {
+      clearHeldKeys();
+      if (sendFn) sendFn({ type: 'move', fwd: 0, turn: 0 });
+    });
     window.addEventListener('keydown', e => {
       if (e.ctrlKey || e.altKey || e.metaKey) return;
       if (_isMoveKey(e.key, e.code)) {

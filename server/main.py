@@ -87,6 +87,9 @@ async def websocket_endpoint(websocket: WebSocket, token: str):
                     })
                 except Exception:
                     pass
+            # Yield so the game loop task can run between bursts of client messages (move spam at
+            # ~30 Hz can otherwise starve asyncio scheduling and delay tick/broadcast for seconds).
+            await asyncio.sleep(0)
     except WebSocketDisconnect:
         pass
     finally:

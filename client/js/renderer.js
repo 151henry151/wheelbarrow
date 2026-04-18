@@ -376,6 +376,10 @@ ${sdRoundBoxFn}`,
     window.addEventListener('resize', resize);
 
     canvas.addEventListener('mousedown', (e) => {
+      // Keep keyboard focus on the canvas (Firefox: DevTools or other UI focus steals WASD).
+      try {
+        canvas.focus({ preventScroll: true });
+      } catch (_) { /* ignore */ }
       if (e.button === 0) {
         _dragging = true;
         _lastPtrX = e.clientX;
