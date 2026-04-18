@@ -32,6 +32,7 @@ from server.game.constants import (
     REPAIR_COST_PER_PCT, REPAIR_FLAT_COST, UPGRADE_COMPONENTS,
     MAX_TAX_RATE, ELECTION_CYCLE_DAYS, VOTING_WINDOW_HOURS,
     VIEWPORT_RADIUS,
+    VIEWPORT_WATER_RADIUS,
 )
 from server.game.seasons import SeasonClock
 from server.game.wb_condition import (
@@ -2047,8 +2048,8 @@ class GameEngine:
             player = self.players.get(pid)
             if not player:
                 continue
-            px, py = player["x"], player["y"]
-            # Viewport-culled nodes / piles / crops
+            px, py = player_tile_xy(player)
+            # Viewport-culled nodes / piles / crops (integer tile — matches movement grid)
             nearby_nodes = [
                 self._node_wire(n) for n in self.nodes.values()
                 if abs(n["x"] - px) <= VIEWPORT_RADIUS and abs(n["y"] - py) <= VIEWPORT_RADIUS
@@ -2242,17 +2243,19 @@ class GameEngine:
         return out
 
     def _nearby_water_tiles(self, px: int, py: int) -> list[dict]:
+        r = VIEWPORT_WATER_RADIUS
         return [
             {"x": x, "y": y}
             for (x, y) in self.water_tiles
-            if abs(x - px) <= VIEWPORT_RADIUS and abs(y - py) <= VIEWPORT_RADIUS
+            if abs(x - px) <= r and abs(y - py) <= r
         ]
 
     def _nearby_bridge_tiles(self, px: int, py: int) -> list[dict]:
+        r = VIEWPORT_WATER_RADIUS
         return [
             {"x": x, "y": y}
             for (x, y) in self.bridge_tiles
-            if abs(x - px) <= VIEWPORT_RADIUS and abs(y - py) <= VIEWPORT_RADIUS
+            if abs(x - px) <= r and abs(y - py) <= r
         ]
 
     def _nearby_poor_soil_tiles(self, px: int, py: int, player_id: int) -> list[dict]:
@@ -2271,7 +2274,7 @@ class GameEngine:
 
     def full_state(self, player_id: int) -> dict:
         player = self.players[player_id]
-        px, py = player["x"], player["y"]
+        px, py = player_tile_xy(player)
         nearby_nodes = [
             self._node_wire(n) for n in self.nodes.values()
             if abs(n["x"]-px) <= VIEWPORT_RADIUS and abs(n["y"]-py) <= VIEWPORT_RADIUS

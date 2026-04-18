@@ -254,6 +254,8 @@ WILDERNESS_PARCELS    = 200        # parcels outside any town
 # ---- World viewport -------------------------
 # Nodes/piles/crops sent per tick only within this radius of the player (tile units)
 VIEWPORT_RADIUS = 72
+# Water/bridges use a slightly larger radius so ponds and rivers appear before the terrain edge.
+VIEWPORT_WATER_RADIUS = 100
 
 # Wild resource grid: extra scatter pass targets these (~2.5× vs single-pass baseline)
 MINERAL_NODE_TYPES = frozenset({"stone", "gravel", "clay", "dirt"})

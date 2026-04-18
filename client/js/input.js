@@ -1,7 +1,7 @@
 /* global Renderer, Terrain */
 const Input = (() => {
   /** Input sample rate (matches server game tick order of magnitude). */
-  const INPUT_INTERVAL_MS = 50;
+  const INPUT_INTERVAL_MS = 33;
   let lastSend = 0;
   let sendFn      = null;
   let onKey       = null;

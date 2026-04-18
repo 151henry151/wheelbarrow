@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.34] - 2026-04-18
+
+### Changed
+- **Client** (`client/js/renderer.js`): **Stop** **resetting** **mesh** **pools** **each** **frame;** **re-attach** **pooled** **groups** **to** **`dynamicRoot`;** **cache** **wheelbarrow** **geometry** **by** **quantized** **yaw/load;** **throttle** **grass** **terrain** **rebuilds** **(~9** **Hz);** **widen** **road** **overlap,** **disable** **road** **cast** **shadow,** **slight** **emissive** **—** **fixes** **severe** **FPS** **stutter** **and** **jerky** **camera**
+- **Client** (`client/js/input.js`): **Send** **movement** **samples** **every** **33** **ms**
+- **Server** (`server/game/constants.py`): **Add** **`VIEWPORT_WATER_RADIUS`** **(100)** **for** **water** **/** **bridge** **payloads**
+- **Server** (`server/game/engine.py`): **Use** **`player_tile_xy`** **for** **viewport** **culling** **(init** **+** **tick);** **send** **water** **/** **bridges** **in** **the** **larger** **water** **radius**
+
 ## [0.12.33] - 2026-04-18
 
 ### Changed

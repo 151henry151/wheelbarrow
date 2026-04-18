@@ -5,8 +5,10 @@
 /* global THREE, Terrain */
 const Renderer = (() => {
   const T = 32;
-  /** Road planes extend well past tile edges (tile pitch is {@link T}) so neighbors overlap into one continuous path. */
-  const ROAD_TILE_OVERLAP = 10;
+  /** Road planes extend past tile edges (tile pitch is {@link T}) so cardinally-adjacent paths read as one ribbon. */
+  const ROAD_TILE_OVERLAP = 14;
+  /** Rebuilding the terrain mesh every frame tanked FPS; grass follows this cadence while the camera stays smooth. */
+  const GRASS_REBUILD_MS = 110;
   /** Water plane is larger than a tile so shader can draw fillets past |p|=1 onto grass. */
   const WATER_QUAD_SCALE = 1.42;
 
@@ -75,6 +77,7 @@ const Renderer = (() => {
   let _camY = 0;
   let _vpW = 0;
   let _vpH = 0;
+  let _lastGrassBuildMs = 0;
 
   /** Created in init() so this file never touches THREE before three.min.js runs. */
   let _dummy;
@@ -353,13 +356,13 @@ ${sdRoundBoxFn}`,
 
     // Flat dirt ribbon (XZ plane) — reads as a path, not a tall block on every tile.
     const roadGeo = new THREE.PlaneGeometry(T + ROAD_TILE_OVERLAP, T + ROAD_TILE_OVERLAP);
-    roadMat = new THREE.MeshLambertMaterial({ color: 0x6a5440 });
+    roadMat = new THREE.MeshLambertMaterial({ color: 0x5c4334, emissive: 0x120c08, emissiveIntensity: 0.35 });
     roadMat.polygonOffset = true;
     roadMat.polygonOffsetFactor = -1;
     roadMat.polygonOffsetUnits = -3;
     roadMesh = new THREE.InstancedMesh(roadGeo, roadMat, MAX_ROAD);
     roadMesh.receiveShadow = true;
-    roadMesh.castShadow = true;
+    roadMesh.castShadow = false;
     roadMesh.renderOrder = 1;
     roadMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     groundGroup.add(roadMesh);
@@ -957,13 +960,19 @@ ${sdRoundBoxFn}`,
     }
   }
 
+  function _ensureOnDynamicRoot(g) {
+    if (g.parent !== dynamicRoot) dynamicRoot.add(g);
+  }
+
   function _ensureNodeMesh(i) {
     while (nodePool.length <= i) {
       const g = new THREE.Group();
       nodePool.push(g);
       dynamicRoot.add(g);
     }
-    return nodePool[i];
+    const g = nodePool[i];
+    _ensureOnDynamicRoot(g);
+    return g;
   }
 
   function _hideNodePool() {
@@ -1242,7 +1251,9 @@ ${sdRoundBoxFn}`,
       pilePool.push(g);
       dynamicRoot.add(g);
     }
-    return pilePool[i];
+    const g = pilePool[i];
+    _ensureOnDynamicRoot(g);
+    return g;
   }
 
   function _piles(sx, sy, ex, ey) {
@@ -1285,7 +1296,9 @@ ${sdRoundBoxFn}`,
       cropPool.push(g);
       dynamicRoot.add(g);
     }
-    return cropPool[i];
+    const g = cropPool[i];
+    _ensureOnDynamicRoot(g);
+    return g;
   }
 
   function _crops(sx, sy, ex, ey) {
@@ -1349,6 +1362,19 @@ ${sdRoundBoxFn}`,
    * handles), open bucket on top, metal legs, wheel + axle — minimal parts.
    */
   function _wheelbarrow3d(grp, colorHex, flatTire, loadFrac, facingOrAngle, label) {
+    const yaw = _yawFromFacingOrAngle(facingOrAngle);
+    const yawKey = (Math.round(yaw * 48) / 48).toFixed(4);
+    const loadKey = (Math.round(loadFrac * 24) / 24).toFixed(3);
+    const cacheKey = `${yawKey}|${flatTire ? 1 : 0}|${loadKey}|${colorHex}`;
+    if (grp.userData._wbCacheKey === cacheKey) {
+      grp.rotation.y = yaw;
+      if (label && grp.userData.wx != null) {
+        const gyy = grp.userData.gy != null ? grp.userData.gy : 0;
+        _spriteText(label, grp.userData.wx, gyy + 44, grp.userData.wz, 0xffffff, true);
+      }
+      return;
+    }
+    grp.userData._wbCacheKey = cacheKey;
     while (grp.children.length) {
       const ch = grp.children[0];
       ch.traverse((o) => {
@@ -1362,7 +1388,6 @@ ${sdRoundBoxFn}`,
       grp.remove(ch);
     }
     const paint = new THREE.Color(colorHex);
-    const yaw = _yawFromFacingOrAngle(facingOrAngle);
     const wood = new THREE.MeshLambertMaterial({ color: 0x5c4330 });
     const woodEnd = new THREE.MeshLambertMaterial({ color: 0x6b5240 });
     const steel = new THREE.MeshLambertMaterial({ color: paint });
@@ -1494,7 +1519,9 @@ ${sdRoundBoxFn}`,
       wbPool.push(g);
       dynamicRoot.add(g);
     }
-    return wbPool[i];
+    const g = wbPool[i];
+    _ensureOnDynamicRoot(g);
+    return g;
   }
 
   function _players(sx, sy, ex, ey, smoothX, smoothY) {
@@ -1593,10 +1620,6 @@ ${sdRoundBoxFn}`,
       });
       dynamicRoot.remove(ch);
     }
-    nodePool.length = 0;
-    pilePool.length = 0;
-    cropPool.length = 0;
-    wbPool.length = 0;
 
     _clearOverlay();
 
@@ -1632,7 +1655,13 @@ ${sdRoundBoxFn}`,
     const hzRgb = _fieldGrassRgb(Math.floor(rx), Math.floor(ry));
     horizonGrass.material.color.setRGB(hzRgb.r, hzRgb.g, hzRgb.b);
 
-    _setGrassTiles(rx, ry, wx, wy, hzRgb.r, hzRgb.g, hzRgb.b);
+    const perfNow = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    const grassAttr = grassMesh.geometry && grassMesh.geometry.getAttribute('position');
+    const grassStale = !grassAttr || !grassAttr.count;
+    if (grassStale || perfNow - _lastGrassBuildMs >= GRASS_REBUILD_MS) {
+      _lastGrassBuildMs = perfNow;
+      _setGrassTiles(rx, ry, wx, wy, hzRgb.r, hzRgb.g, hzRgb.b);
+    }
     _waterAndRoadsInView(sx, sy, ex, ey);
     _soilFurrows(sx, sy, ex, ey);
     _bridges(sx, sy, ex, ey);
