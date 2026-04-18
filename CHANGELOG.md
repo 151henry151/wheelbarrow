@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.44] - 2026-04-16
+
+### Fixed
+- **Client** (`client/js/input.js`): **Send** **`move`** **only** **when** **`fwd`** **/** **`turn`** **changes** **from** **the** **last** **sent** **command** **—** **stop** **~30×/s** **idle** **`{fwd:0,turn:0}`** **spam** **that** **flooded** **the** **WebSocket** **and** **contributed** **to** **`tick`** **starvation** **and** **disconnects**
+
 ## [0.12.43] - 2026-04-16
 
 ### Fixed

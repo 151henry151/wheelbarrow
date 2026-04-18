@@ -1,13 +1,16 @@
 /* global Renderer, Terrain */
 const Input = (() => {
-  /** Input sample rate (matches server game tick order of magnitude). */
-  const INPUT_INTERVAL_MS = 33;
-  let lastSend = 0;
   let sendFn      = null;
   let onKey       = null;
   let autopilotBlocked = false;
   /** Last sampled fwd (–1..1) for edge detect — snap facing when starting drive from rest. */
   let lastFwdSample = 0;
+  /**
+   * Last JSON.stringify({fwd, turn}) sent. Server integrates from stored _input_fwd/_input_turn
+   * each tick, so ~30×/s redundant move frames flood the WebSocket and starve tick delivery.
+   * Send when fwd/turn changes; optional face_angle on one packet does not affect this key.
+   */
+  let lastSentMoveSig = JSON.stringify({ fwd: 0, turn: 0 });
 
   const held = {};
 
@@ -33,7 +36,11 @@ const Input = (() => {
     onKey  = keyFn;
     window.addEventListener('blur', () => {
       clearHeldKeys();
-      if (sendFn) sendFn({ type: 'move', fwd: 0, turn: 0 });
+      if (sendFn) {
+        const z = { type: 'move', fwd: 0, turn: 0 };
+        sendFn(z);
+        lastSentMoveSig = _moveSig(z);
+      }
     });
     window.addEventListener('keydown', e => {
       if (e.ctrlKey || e.altKey || e.metaKey) return;
@@ -62,13 +69,17 @@ const Input = (() => {
     });
   }
 
+  /** Server integrates from last _input_fwd/_input_turn; compare only fwd+turn for dedupe. */
+  function _moveSig(msg) {
+    return JSON.stringify({ fwd: msg.fwd, turn: msg.turn });
+  }
+
   /**
    * Up/Down = forward/back; Left/Right = turn. Starting fwd/back from rest (no turn) snaps facing
    * to the orbit camera via face_angle, then drives — so you can point the view and drive into it.
    */
   function update(now, player, world) {
     if (!sendFn || autopilotBlocked) return;
-    if (now - lastSend < INPUT_INTERVAL_MS) return;
 
     let fwd = 0;
     let turn = 0;
@@ -94,7 +105,9 @@ const Input = (() => {
     }
     lastFwdSample = fwd;
 
-    lastSend = now;
+    const sig = _moveSig(msg);
+    if (sig === lastSentMoveSig) return;
+    lastSentMoveSig = sig;
     sendFn(msg);
   }
 
@@ -105,6 +118,7 @@ const Input = (() => {
   function clearHeldKeys() {
     for (const k of Object.keys(held)) delete held[k];
     lastFwdSample = 0;
+    lastSentMoveSig = JSON.stringify({ fwd: 0, turn: 0 });
   }
 
   /**
