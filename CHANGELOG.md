@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.4] - 2026-04-17
+
+### Changed
+- **Client** (`client/js/renderer.js`): **Water** — override `opaque_fragment` so **`gl_FragColor` uses `uniform diffuse` only** (skips `outgoingLight` from MeshBasic’s indirect/envmap path in Three r160); remove **`fog_fragment`** for water; set **`toneMapped: false`**; slightly brighter blue **0x3aa6e8**
+
 ## [0.12.3] - 2026-04-17
 
 ### Changed

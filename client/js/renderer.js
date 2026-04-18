@@ -252,11 +252,12 @@ const Renderer = (() => {
       'aWaterR',
       new THREE.InstancedBufferAttribute(new Float32Array(MAX_WATER * 4), 4),
     );
-    // Unlit: HemisphereLight ground color (0x4a6040) tints lit Phong/Lambert upward faces green;
-    // opaque Phong water still read as murky green next to grass.
+    // MeshBasic in Three r160 still runs indirect/envmap/fog/tonemap in the fragment; that path can
+    // skew color. We output `diffuse` directly in onBeforeCompile (true unlit) + toneMapped:false.
     waterMat = new THREE.MeshBasicMaterial({
-      color: 0x2f88d0,
+      color: 0x3aa6e8,
       fog: false,
+      toneMapped: false,
     });
     waterMat.onBeforeCompile = (shader) => {
       shader.vertexShader = shader.vertexShader.replace(
@@ -292,6 +293,17 @@ float dWaterClip = sdRoundedBox2D( pwbW, vec2(1.0), vWaterR );
 if ( dWaterClip > 0.001 ) discard;
 #include <color_fragment>
 `,
+      );
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <opaque_fragment>',
+        `#ifdef OPAQUE
+diffuseColor.a = 1.0;
+#endif
+gl_FragColor = vec4( diffuse, diffuseColor.a );`,
+      );
+      shader.fragmentShader = shader.fragmentShader.replace(
+        /#include <fog_fragment>/g,
+        '/* water: no fog */',
       );
     };
     waterMesh = new THREE.InstancedMesh(waterGeo, waterMat, MAX_WATER);
