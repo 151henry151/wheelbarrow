@@ -249,7 +249,9 @@ const Renderer = (() => {
       'aWaterR',
       new THREE.InstancedBufferAttribute(new Float32Array(MAX_WATER * 4), 4),
     );
-    // Hardcoded linear RGB in GLSL — `diffuse` uniform can still pick up wrong color management paths.
+    // Rounded mask uses Inigo’s sdRoundBox in UV space: p = (vUv-0.5)*2 with +y = vUv up (no Y flip).
+    // vec4 r order (bl, br, tr, tl) = (rSW, rSE, rNE, rNW) matching tile corners at UV (0,0),(1,0),(1,1),(0,1).
+    // Do not call linearToOutputTexel here — it mixed badly with this minimal shader and read olive/green.
     waterMat = new THREE.MeshBasicMaterial({
       color: 0x4cb8f2,
       fog: false,
@@ -275,7 +277,6 @@ varying vec2 vUv;
 #include <common>
 #include <clipping_planes_pars_fragment>
 #include <logdepthbuf_pars_fragment>
-#include <colorspace_pars_fragment>
 float sdRoundedBox2D( vec2 p, vec2 b, vec4 r ) {
   r.xy = (p.x>0.0)?r.xy : r.zw;
   r.x  = (p.y>0.0)?r.x  : r.y;
@@ -284,14 +285,11 @@ float sdRoundedBox2D( vec2 p, vec2 b, vec4 r ) {
 }
 void main() {
   #include <clipping_planes_fragment>
-  vec2 puvW = (vUv - 0.5) * 2.0;
-  vec2 pwbW = vec2(puvW.x, -puvW.y);
-  float dWaterClip = sdRoundedBox2D( pwbW, vec2(1.0), vWaterR );
+  vec2 p = (vUv - 0.5) * 2.0;
+  float dWaterClip = sdRoundedBox2D( p, vec2(1.0), vWaterR );
   if ( dWaterClip > 0.001 ) discard;
-  // Linear blue: keep G < B clearly so fog/tone pipeline cannot read as olive
-  gl_FragColor = vec4( 0.08, 0.44, 0.96, 1.0 );
+  gl_FragColor = vec4( 0.22, 0.62, 0.98, 1.0 );
   #include <logdepthbuf_fragment>
-  gl_FragColor = linearToOutputTexel( gl_FragColor );
 }
 `;
     };
@@ -300,8 +298,12 @@ void main() {
     waterMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     groundGroup.add(waterMesh);
 
-    const roadGeo = new THREE.BoxGeometry(T - 0.5, 1.8, T - 0.5);
+    // Nearly full tile width so adjacent road tiles don’t show grass gaps; slight inset avoids z-fighting.
+    const roadGeo = new THREE.BoxGeometry(T - 0.06, 1.8, T - 0.06);
     roadMat = new THREE.MeshLambertMaterial({ color: 0x6a5440 });
+    roadMat.polygonOffset = true;
+    roadMat.polygonOffsetFactor = -0.5;
+    roadMat.polygonOffsetUnits = -2;
     roadMesh = new THREE.InstancedMesh(roadGeo, roadMat, MAX_ROAD);
     roadMesh.receiveShadow = true;
     roadMesh.castShadow = true;
@@ -598,10 +600,11 @@ void main() {
       const rNE = (wE && wN) ? 0 : Rc;
       const rNW = (wW && wN) ? 0 : Rc;
       const o = wi * 4;
-      waterRArr[o] = rSW;
+      // Inigo sdRoundBox vec4: r.xy = east (NE, SE), r.zw = west (NW, SW) for p = (vUv-0.5)*2, +y up
+      waterRArr[o] = rNE;
       waterRArr[o + 1] = rSE;
-      waterRArr[o + 2] = rNE;
-      waterRArr[o + 3] = rNW;
+      waterRArr[o + 2] = rNW;
+      waterRArr[o + 3] = rSW;
       wi += 1;
     };
     const pushR = (tx, ty) => {

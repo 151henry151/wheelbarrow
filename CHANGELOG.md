@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.7] - 2026-04-17
+
+### Changed
+- **Client** (`client/js/renderer.js`): **Water** — fix **Inigo `sdRoundBox` vec4 layout** (east `NE,SE` + west `NW,SW`); use **`p = (vUv-0.5)*2` without Y flip**; drop **`linearToOutputTexel`** on this pass; solid **blue** `gl_FragColor` after discard
+- **Client** (`client/js/renderer.js`): **Roads** — **`T - 0.06`** tile coverage (was **`T - 0.5`**) + **`polygonOffset`** to hide grass seams between road tiles
+
 ## [0.12.6] - 2026-04-17
 
 ### Changed
