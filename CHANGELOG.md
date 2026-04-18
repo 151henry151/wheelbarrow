@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.56] - 2026-04-18
+
+### Fixed
+- **Client** (`client/js/input.js`): **Send** **`face_angle`** **on** **every** **`move`** **while** **`fwd`** **≠** **0** **and** **no** **turn** **keys** **—** **keeps** **server** **heading** **aligned** **with** **orbit** **camera** **view** **(not** **only** **on** **first** **press** **from** **rest);** **avoids** **desync** **where** **velocity** **no** **longer** **matches** **“into** **the** **screen”** **until** **rest** **+** **camera** **orbit** **resends** **`face_angle`**
+
 ## [0.12.55] - 2026-04-18
 
 ### Fixed

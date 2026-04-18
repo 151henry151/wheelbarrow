@@ -1,4 +1,4 @@
-const GAME_VERSION = 'v0.12.55';
+const GAME_VERSION = 'v0.12.56';
 
 // Mirrored from server/game/constants.py
 const WB_BARROW_MATERIAL_NAMES = { 1: 'plastic', 2: 'steel',    3: 'aluminium' };

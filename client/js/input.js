@@ -95,11 +95,13 @@ const Input = (() => {
     turn = Math.max(-1, Math.min(1, turn));
 
     const msg = { type: 'move', fwd, turn };
-    // From a full stop, align barrow to orbit camera before driving (not tank-facing).
+    // Camera-relative forward (W/S only): keep sending view-facing angle so server heading matches
+    // the orbit camera every frame. If we only sent face_angle once from rest, camera lerp + tick
+    // lag could desync angle from "into the screen"; movement then feels stuck until rest+orbit+W
+    // sends a fresh face_angle. Do not send while turn keys are held — those drive tank rotation.
     const wasAtRest = lastFwdSample === 0;
     if (
       fwd !== 0
-      && wasAtRest
       && turn === 0
       && typeof Renderer !== 'undefined'
       && typeof Renderer.getCameraFacingAngle === 'function'
