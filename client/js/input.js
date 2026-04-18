@@ -11,20 +11,33 @@ const Input = (() => {
 
   const held = {};
 
+  /** Movement: arrows or WASD (lowercase keys in `held`). */
+  function _isMoveKey(key) {
+    if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(key)) return true;
+    const k = key.length === 1 ? key.toLowerCase() : '';
+    return k === 'w' || k === 'a' || k === 's' || k === 'd';
+  }
+
   function init(fn, keyFn) {
     sendFn = fn;
     onKey  = keyFn;
     window.addEventListener('keydown', e => {
       if (e.ctrlKey || e.altKey || e.metaKey) return;
-      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+      if (_isMoveKey(e.key)) {
         e.preventDefault();
-        held[e.key] = true;
+        if (e.key.startsWith('Arrow')) held[e.key] = true;
+        else held[e.key.toLowerCase()] = true;
         return;
       }
       e.preventDefault();
       onKey && onKey(e.key);
     });
-    window.addEventListener('keyup', e => { delete held[e.key]; });
+    window.addEventListener('keyup', e => {
+      if (_isMoveKey(e.key)) {
+        if (e.key.startsWith('Arrow')) delete held[e.key];
+        else delete held[e.key.toLowerCase()];
+      } else delete held[e.key];
+    });
   }
 
   /**
@@ -37,11 +50,11 @@ const Input = (() => {
 
     let fwd = 0;
     let turn = 0;
-    if (held.ArrowUp) fwd += 1;
-    if (held.ArrowDown) fwd -= 1;
+    if (held.ArrowUp || held.w) fwd += 1;
+    if (held.ArrowDown || held.s) fwd -= 1;
     // Positive server turn increases angle (clockwise in x-right, y-down space); screen “left” is CCW.
-    if (held.ArrowLeft) turn -= 1;
-    if (held.ArrowRight) turn += 1;
+    if (held.ArrowLeft || held.a) turn -= 1;
+    if (held.ArrowRight || held.d) turn += 1;
     fwd = Math.max(-1, Math.min(1, fwd));
     turn = Math.max(-1, Math.min(1, turn));
 
@@ -82,6 +95,10 @@ const Input = (() => {
       || held.ArrowDown
       || held.ArrowLeft
       || held.ArrowRight
+      || held.w
+      || held.s
+      || held.a
+      || held.d
     );
   }
 

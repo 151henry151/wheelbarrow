@@ -619,7 +619,7 @@ function _updateHint() {
     n => n.is_structure && !n.construction_active && n.x === px && n.y === py && n.owner_id === p.id,
   );
   if (myStructHere && !myStructHere.is_town_hall) {
-    hints.push('[D] tear down building (partial material refund to piles)');
+    hints.push('[K] tear down building (partial material refund to piles)');
   }
 
   const adj = _adjFromFacing(px, py, state.facing);
@@ -975,7 +975,7 @@ function handleKey(key) {
   if (lk === 'u')  { WS.send({ type: 'unload' }); return; }
   if (lk === 'g')  { WS.send({ type: 'deposit_build' }); return; }
   if (lk === 'x')  { WS.send({ type: 'cancel_construction' }); return; }
-  if (lk === 'd')  { WS.send({ type: 'demolish_structure' }); return; }
+  if (lk === 'k')  { WS.send({ type: 'demolish_structure' }); return; }
   if (lk === 'i')  { WS.send({ type: 'improve_soil' }); return; }
   if (lk === 'l')  { WS.send({ type: 'fill_water', dir: state.facing }); return; }
   if (lk === 'j')  { WS.send({ type: 'bridge_deposit', dir: state.facing }); return; }

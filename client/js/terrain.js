@@ -1,10 +1,10 @@
 /**
  * Rolling elevation (shared server formula in server/game/terrain_elevation.py).
- * Hills — height is smooth across tile integer coords.
+ * Hills — height is a smooth function of **float** tile coords (same space as player x,y).
  *
- * Tiles are T=32 world units wide; the old scale (×12) gave ~0.5–1 ΔY per tile
- * (~1–2° slope), which read as flat. WORLD_Y_SCALE is chosen so adjacent-tile
- * steps are a few world units (visibly terraced grass planes).
+ * Integer (tx, ty) matches server tile indices; sub-tile values give continuous height
+ * for rendering (smooth terrain mesh) and for camera/object Y when the player stands
+ * between tile centers.
  */
 const Terrain = (() => {
   const DEFAULT_W = 1000;
@@ -12,8 +12,8 @@ const Terrain = (() => {
   /** Matches server/game/terrain_elevation.py */
   const WORLD_Y_SCALE = 48;
 
-  /** ~[-1, 1] smooth noise; used for slope and scaled for world Y. */
-  function elevationRaw(tx, ty) {
+  /** ~[-1, 1] smooth field; tx, ty may be fractional (game tile / barrow position space). */
+  function elevationRawFloat(tx, ty) {
     const fx = tx * 0.06;
     const fy = ty * 0.07;
     const low =
@@ -26,9 +26,18 @@ const Terrain = (() => {
     return Math.max(-1, Math.min(1, r));
   }
 
-  /** Visual height in world units (Three.js Y). */
+  /** Integer tile samples (server / movement) — same formula as floats at integers. */
+  function elevationRaw(tx, ty) {
+    return elevationRawFloat(tx, ty);
+  }
+
+  /** Visual height in world units (Three.js Y); use floats for smooth ground. */
+  function worldYFloat(tx, ty) {
+    return 2 + elevationRawFloat(tx, ty) * WORLD_Y_SCALE;
+  }
+
   function worldY(tx, ty) {
-    return 2 + elevationRaw(tx, ty) * WORLD_Y_SCALE;
+    return worldYFloat(tx, ty);
   }
 
   /**
@@ -48,5 +57,5 @@ const Terrain = (() => {
     return Math.max(0.76, Math.min(1.24, m));
   }
 
-  return { elevationRaw, worldY, moveIntervalMult };
+  return { elevationRaw, elevationRawFloat, worldY, worldYFloat, moveIntervalMult };
 })();

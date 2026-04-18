@@ -3,7 +3,12 @@ from __future__ import annotations
 
 import math
 
-from server.game.terrain_elevation import WORLD_Y_SCALE, elevation_raw, world_y_units
+from server.game.terrain_elevation import (
+    WORLD_Y_SCALE,
+    elevation_raw,
+    elevation_raw_float,
+    world_y_units,
+)
 
 
 def _ref_raw(tx: int, ty: int) -> float:
@@ -33,3 +38,14 @@ def test_world_y_formula() -> None:
 def test_matches_reference_implementation() -> None:
     for tx, ty in ((100, 200), (500, 500), (812, 91)):
         assert elevation_raw(tx, ty) == _ref_raw(tx, ty)
+
+
+def test_elevation_raw_float_matches_integers() -> None:
+    for tx, ty in ((3, 4), (100, 200)):
+        assert elevation_raw_float(float(tx), float(ty)) == elevation_raw(tx, ty)
+
+
+def test_elevation_raw_float_smooth() -> None:
+    a = elevation_raw_float(10.0, 20.0)
+    b = elevation_raw_float(10.25, 20.0)
+    assert a != b

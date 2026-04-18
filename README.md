@@ -13,7 +13,7 @@ Inspired by the spirit of [A Tractor](https://store.steampowered.com/app/779050/
 ## Gameplay
 
 ### The basics
-- Move with **arrow keys** — speed depends on your load; heavier materials (gravel, stone) slow you significantly; an empty aluminium barrow is faster than a loaded plastic one
+- Move with **arrow keys** or **WASD** — speed depends on your load; heavier materials (gravel, stone) slow you significantly; an empty aluminium barrow is faster than a loaded plastic one
 - **Other players** only appear while they have an active browser session; when someone disconnects, their wheelbarrow disappears from your view until they log in again (their land and piles stay in the world)
 - **Park near a resource** and your bucket slowly fills — proximity collection is passive
 - **Haul your load** to the NPC market (`50,60`) and press **Space** to sell; on a **large pile of your own** (`E` → **Sell all at NPC market…**), confirm to autopilot load → sell → repeat until the pile is empty (**any key except H** cancels)
@@ -24,14 +24,14 @@ Inspired by the spirit of [A Tractor](https://store.steampowered.com/app/779050/
 
 | Key | Action |
 |---|---|
-| Arrow keys | Move |
+| Arrow keys / **WASD** | Move |
 | Space | Sell at NPC market |
 | B | Preview parcel under your feet; press B again to confirm purchase |
 | P | Open build menu (on own land) |
 | U | Unload bucket — resource pile on own land; **wheat** goes into a **completed silo** if you stand on your silo |
 | G | Deliver barrow materials to a **construction site** under your feet (your own site); HUD shows remaining foundation/building amounts |
 | X | **Cancel construction** on your site — returns deposited materials to piles (starting coins not refunded) |
-| D | **Tear down** a completed building on your tile (Town Hall excluded) — partial material refund to piles |
+| K | **Tear down** a completed building on your tile (Town Hall excluded) — partial material refund to piles |
 | I | **Improve poor soil** — spread 1 **dirt** from the barrow on a parcel tile that needs it before you can till |
 | L | **Fill water** — face an adjacent water tile on **your** land; consumes 1 dirt from the barrow |
 | J | **Bridge** — face a water tile; pay coin cost once per tile, then deliver wood until the bridge completes (not on another player’s land) |

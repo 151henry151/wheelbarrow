@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.31] - 2026-04-16
+
+### Changed
+- **Client** (`client/js/terrain.js`): **Expose** **`elevationRawFloat`** **/** **`worldYFloat`** **for** **continuous** **height** **(same** **formula** **as** **integers)**
+- **Client** (`client/js/renderer.js`): **Replace** **instanced** **flat** **grass** **quads** **with** **an** **indexed** **terrain** **mesh** **—** **vertices** **sample** **`worldYFloat`;** **optional** **2×** **subdivision** **per** **tile** **when** **the** **loaded** **patch** **is** **small** **enough**
+- **Server** (`server/game/terrain_elevation.py`): **Add** **`elevation_raw_float`** **and** **delegate** **`elevation_raw`**
+- **Tests** (`tests/test_terrain_elevation.py`): **Cover** **float** **elevation**
+
+## [0.12.30] - 2026-04-16
+
+### Changed
+- **Client** (`client/js/input.js`): **Treat** **WASD** **as** **movement** **with** **arrow** **keys** **(camera** **follow** **unchanged)**
+- **Client** (`client/js/game.js`): **Map** **tear-down** **to** **`K`** **instead** **of** **`D`** **so** **it** **does** **not** **conflict** **with** **strafe** **right**
+- **Docs** (`README.md`): **Document** **WASD** **and** **`K`** **for** **demolish**
+
 ## [0.12.29] - 2026-04-16
 
 ### Changed

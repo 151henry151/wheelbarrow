@@ -11,8 +11,8 @@ import math
 WORLD_Y_SCALE = 48.0
 
 
-def elevation_raw(tx: int, ty: int) -> float:
-    """Smooth ~[-1, 1] height field on integer tile coords."""
+def elevation_raw_float(tx: float, ty: float) -> float:
+    """Smooth ~[-1, 1] height field; tx, ty may be fractional (matches client elevationRawFloat)."""
     fx = tx * 0.06
     fy = ty * 0.07
     low = (
@@ -25,6 +25,11 @@ def elevation_raw(tx: int, ty: int) -> float:
     return max(-1.0, min(1.0, r))
 
 
+def elevation_raw(tx: int, ty: int) -> float:
+    """Integer tile samples (movement); same as elevation_raw_float at integers."""
+    return elevation_raw_float(float(tx), float(ty))
+
+
 def world_y_units(tx: int, ty: int) -> float:
-    """Nominal vertical offset in client world units (matches Terrain.worldY)."""
+    """Nominal vertical offset at tile center (matches client Terrain.worldY for integers)."""
     return 2.0 + elevation_raw(tx, ty) * WORLD_Y_SCALE

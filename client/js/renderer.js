@@ -44,7 +44,7 @@ const Renderer = (() => {
   let horizonGrass;
   let grassMesh;
   let grassMat;
-  /** Instanced grass cap — keep iteration (~π r²) cheap per frame. */
+  /** Max land tiles in the grass disk (~π r²); mesh vertex budget scales with this. */
   const MAX_GRASS = 10000;
   /** Radial fade band at grass edge (world units ≈ tiles × T). */
   const GRASS_FADE_TILES = 14;
@@ -236,15 +236,10 @@ const Renderer = (() => {
     horizonGrass.renderOrder = -20;
     groundGroup.add(horizonGrass);
 
-    const grassGeo = new THREE.PlaneGeometry(T, T);
-    grassGeo.rotateX(-Math.PI / 2);
-    // Per-tile colors use InstancedMesh instanceColor — do not set vertexColors: true (breaks instance tint).
-    grassMat = new THREE.MeshLambertMaterial();
-    grassMat.fog = false;
-    grassMesh = new THREE.InstancedMesh(grassGeo, grassMat, MAX_GRASS);
+    grassMat = new THREE.MeshLambertMaterial({ vertexColors: true, fog: false });
+    grassMesh = new THREE.Mesh(new THREE.BufferGeometry(), grassMat);
     grassMesh.receiveShadow = true;
     grassMesh.castShadow = false;
-    grassMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     grassMesh.renderOrder = 0;
     groundGroup.add(grassMesh);
 
@@ -426,7 +421,7 @@ ${sdRoundBoxFn}`,
   }
 
   function _groundY(tx, ty) {
-    if (typeof Terrain !== 'undefined') return Terrain.worldY(tx, ty);
+    if (typeof Terrain !== 'undefined') return Terrain.worldYFloat(tx, ty);
     return 0;
   }
 
@@ -597,46 +592,100 @@ ${sdRoundBoxFn}`,
   }
 
   /**
-   * Grass in a **circle** around the player (no square corners). Outer ring blends tile color
-   * toward the horizon plane color so the edge softens into the infinite green backdrop.
+   * Smooth grass terrain: indexed mesh with height = Terrain.worldYFloat at each vertex.
+   * Skips water tiles (same footprint as before). SUB=2 when the bbox is small enough.
    */
   function _setGrassTiles(px, py, wx, wy, hzR, hzG, hzB) {
     const rTiles = Math.sqrt(MAX_GRASS / Math.PI);
     const rFade0 = Math.max(0, rTiles - GRASS_FADE_TILES);
-
-    let i = 0;
     const waterKey = new Set((s.water_tiles || []).map((w) => `${w.x},${w.y}`));
     const bbox = Math.ceil(rTiles) + 2;
     const tcx = Math.floor(px);
     const tcy = Math.floor(py);
-    for (let ty = tcy - bbox; ty <= tcy + bbox && i < MAX_GRASS; ty++) {
-      for (let tx = tcx - bbox; tx <= tcx + bbox && i < MAX_GRASS; tx++) {
+
+    let minTx = Infinity;
+    let maxTx = -Infinity;
+    let minTy = Infinity;
+    let maxTy = -Infinity;
+    let anyLand = false;
+    for (let ty = tcy - bbox; ty <= tcy + bbox; ty++) {
+      for (let tx = tcx - bbox; tx <= tcx + bbox; tx++) {
         if (tx < 0 || ty < 0 || tx >= wx || ty >= wy) continue;
-        const dx = tx + 0.5 - px;
-        const dy = ty + 0.5 - py;
-        const dist = Math.hypot(dx, dy);
+        const dist = Math.hypot(tx + 0.5 - px, ty + 0.5 - py);
         if (dist > rTiles) continue;
         if (waterKey.has(`${tx},${ty}`)) continue;
-        const { x, z } = _worldXZ(tx, ty);
-        _dummy.position.set(x, _groundY(tx, ty), z);
-        _dummy.rotation.set(0, 0, 0);
-        _dummy.scale.set(1, 1, 1);
-        _dummy.updateMatrix();
-        grassMesh.setMatrixAt(i, _dummy.matrix);
-        const base = _grassRgbContinuous(x, z);
-        const shade = 1 - 0.035 * Math.sin(x * 0.031) * Math.sin(z * 0.029);
-        const edgeBlend = _smoothstep01(rFade0, rTiles, dist);
-        const r = base.r * shade * (1 - edgeBlend) + hzR * edgeBlend;
-        const g = base.g * shade * (1 - edgeBlend) + hzG * edgeBlend;
-        const b = base.b * shade * (1 - edgeBlend) + hzB * edgeBlend;
-        _c.setRGB(r, g, b);
-        grassMesh.setColorAt(i, _c);
-        i++;
+        anyLand = true;
+        minTx = Math.min(minTx, tx);
+        maxTx = Math.max(maxTx, tx);
+        minTy = Math.min(minTy, ty);
+        maxTy = Math.max(maxTy, ty);
       }
     }
-    grassMesh.count = i;
-    grassMesh.instanceMatrix.needsUpdate = true;
-    if (grassMesh.instanceColor) grassMesh.instanceColor.needsUpdate = true;
+
+    if (grassMesh.geometry) grassMesh.geometry.dispose();
+
+    if (!anyLand || !Number.isFinite(minTx)) {
+      grassMesh.geometry = new THREE.BufferGeometry();
+      grassMesh.visible = false;
+      return;
+    }
+    grassMesh.visible = true;
+
+    const Wt = maxTx - minTx + 1;
+    const Ht = maxTy - minTy + 1;
+    const SUB = Wt * Ht > 4200 ? 1 : 2;
+    const nx = Wt * SUB;
+    const ny = Ht * SUB;
+    const vCount = (nx + 1) * (ny + 1);
+    const positions = new Float32Array(vCount * 3);
+    const colors = new Float32Array(vCount * 3);
+    const idxRow = nx + 1;
+
+    for (let j = 0; j <= ny; j++) {
+      for (let i = 0; i <= nx; i++) {
+        const gx = minTx - 0.5 + i / SUB;
+        const gy = minTy - 0.5 + j / SUB;
+        const wxp = gx * T + T / 2;
+        const wzp = gy * T + T / 2;
+        const y = Terrain.worldYFloat(gx, gy);
+        const p = (j * idxRow + i) * 3;
+        positions[p] = wxp;
+        positions[p + 1] = y;
+        positions[p + 2] = wzp;
+        const dist = Math.hypot(gx - px, gy - py);
+        const base = _grassRgbContinuous(wxp, wzp);
+        const shade = 1 - 0.035 * Math.sin(wxp * 0.031) * Math.sin(wzp * 0.029);
+        const edgeBlend = _smoothstep01(rFade0, rTiles, dist);
+        colors[p] = base.r * shade * (1 - edgeBlend) + hzR * edgeBlend;
+        colors[p + 1] = base.g * shade * (1 - edgeBlend) + hzG * edgeBlend;
+        colors[p + 2] = base.b * shade * (1 - edgeBlend) + hzB * edgeBlend;
+      }
+    }
+
+    const indices = [];
+    for (let j = 0; j < ny; j++) {
+      for (let i = 0; i < nx; i++) {
+        const tx = minTx + Math.floor(i / SUB);
+        const ty = minTy + Math.floor(j / SUB);
+        if (tx < 0 || ty < 0 || tx >= wx || ty >= wy) continue;
+        if (waterKey.has(`${tx},${ty}`)) continue;
+        if (Math.hypot(tx + 0.5 - px, ty + 0.5 - py) > rTiles) continue;
+        const a = j * idxRow + i;
+        const b = a + 1;
+        const d = a + idxRow;
+        const c = d + 1;
+        indices.push(a, b, d, b, c, d);
+      }
+    }
+
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    if (indices.length) {
+      geo.setIndex(indices);
+    }
+    geo.computeVertexNormals();
+    grassMesh.geometry = geo;
   }
 
   function _waterAndRoadsInView(sx, sy, ex, ey) {
