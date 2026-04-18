@@ -5,6 +5,8 @@
 /* global THREE, Terrain */
 const Renderer = (() => {
   const T = 32;
+  /** Road quads extend past tile borders so adjacent instances overlap and grass seams do not show. */
+  const ROAD_TILE_OVERLAP = 0.22;
   /** Water plane is larger than a tile so shader can draw fillets past |p|=1 onto grass. */
   const WATER_QUAD_SCALE = 1.42;
 
@@ -354,12 +356,12 @@ ${sdRoundBoxFn}`,
     waterMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     groundGroup.add(waterMesh);
 
-    // Nearly full tile width so adjacent road tiles don’t show grass gaps; slight inset avoids z-fighting.
-    const roadGeo = new THREE.BoxGeometry(T - 0.06, 1.8, T - 0.06);
+    // Slightly larger than T so neighbors overlap (inset T−ε left thin gaps showing grass/grid lines).
+    const roadGeo = new THREE.BoxGeometry(T + ROAD_TILE_OVERLAP, 1.8, T + ROAD_TILE_OVERLAP);
     roadMat = new THREE.MeshLambertMaterial({ color: 0x6a5440 });
     roadMat.polygonOffset = true;
-    roadMat.polygonOffsetFactor = -0.5;
-    roadMat.polygonOffsetUnits = -2;
+    roadMat.polygonOffsetFactor = -1;
+    roadMat.polygonOffsetUnits = -3;
     roadMesh = new THREE.InstancedMesh(roadGeo, roadMat, MAX_ROAD);
     roadMesh.receiveShadow = true;
     roadMesh.castShadow = true;

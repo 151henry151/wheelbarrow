@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.20] - 2026-04-18
+
+### Changed
+- **Client** (`client/js/renderer.js`): **Road** **tiles** **use** **`T + ROAD_TILE_OVERLAP`** **instead** **of** **`T − ε`** **so** **adjacent** **road** **boxes** **overlap** **and** **grass** **does** **not** **show** **through** **seams**; **tighten** **`polygonOffset`** **slightly** **for** **the** **road** **material**
+
 ## [0.12.19] - 2026-04-18
 
 ### Changed
