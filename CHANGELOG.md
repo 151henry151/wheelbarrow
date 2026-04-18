@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.25] - 2026-04-18
+
+### Changed
+- **Client** (`client/js/renderer.js`): **Wheelbarrow** **—** **shorten** **axle** **to** **~10** **units** **(rail** **track)** **and** **move** **wheel** **to** **z≈** **rail** **tips** **so** **the** **tire** **sits** **in** **the** **V** **with** **axle** **ends** **at** **the** **frame**
+
 ## [0.12.24] - 2026-04-18
 
 ### Changed

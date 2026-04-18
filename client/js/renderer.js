@@ -1343,8 +1343,10 @@ ${sdRoundBoxFn}`,
 
     const wheelR = flatTire ? 6.2 : 8.0;
     const wheelW = 3.2;
-    const axleZ = 20;
+    // Rail tips at z=fz — wheel centered in the V; axle only spans rail spacing (matches fz below).
+    const axleZ = 12.95;
     const axleY = wheelR;
+    const axleLen = 10.2;
 
     const tire = new THREE.Mesh(new THREE.CylinderGeometry(wheelR, wheelR, wheelW, 28), rubber);
     tire.rotation.z = Math.PI / 2;
@@ -1354,21 +1356,21 @@ ${sdRoundBoxFn}`,
     grp.add(tire);
 
     const hub = new THREE.Mesh(
-      new THREE.CylinderGeometry(wheelR * 0.26, wheelR * 0.26, wheelW + 0.5, 16),
+      new THREE.CylinderGeometry(wheelR * 0.26, wheelR * 0.26, wheelW + 0.35, 16),
       rimMetal,
     );
     hub.rotation.z = Math.PI / 2;
     hub.position.set(0, axleY, axleZ);
     grp.add(hub);
 
-    const axle = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 0.9, 26, 10), rimMetal);
+    const axle = new THREE.Mesh(new THREE.CylinderGeometry(0.85, 0.85, axleLen, 10), rimMetal);
     axle.rotation.z = Math.PI / 2;
     axle.position.set(0, axleY, axleZ);
     axle.castShadow = true;
     grp.add(axle);
 
-    const nose = new THREE.Mesh(new THREE.BoxGeometry(11, 1.4, 2.2), rimMetal);
-    nose.position.set(0, axleY - 1.2, 13.5);
+    const nose = new THREE.Mesh(new THREE.BoxGeometry(10.5, 1.4, 2.2), rimMetal);
+    nose.position.set(0, axleY - 1.2, 12.35);
     nose.castShadow = true;
     grp.add(nose);
 
