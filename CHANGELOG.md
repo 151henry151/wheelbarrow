@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.5] - 2026-04-17
+
+### Changed
+- **Client** (`client/js/renderer.js`): **Water** — replace MeshBasic fragment with a **minimal shader** (rounded `discard`, then `gl_FragColor = vec4(diffuse,1)`, `logdepthbuf`, `linearToOutputTexel`) so color is not pulled green by the default basic indirect/envmap path; brighter blue **0x4cb8f2**
+- **Client** (`client/js/renderer.js`): **Ground tile cull** — **`_expandTileRangeForGroundLayers`** unions the frustum tile rect with a **player-centered footprint** (scale with camera distance) + padding so **roads/water** and other ground layers are not dropped at shallow orbit angles
+- **Client** (`client/js/renderer.js`): **Nodes** — remove the **green/orange “amount” progress bar** meshes on wild resources and structures (trees, rocks, etc.)
+
 ## [0.12.4] - 2026-04-17
 
 ### Changed

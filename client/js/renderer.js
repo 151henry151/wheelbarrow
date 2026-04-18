@@ -252,10 +252,10 @@ const Renderer = (() => {
       'aWaterR',
       new THREE.InstancedBufferAttribute(new Float32Array(MAX_WATER * 4), 4),
     );
-    // MeshBasic in Three r160 still runs indirect/envmap/fog/tonemap in the fragment; that path can
-    // skew color. We output `diffuse` directly in onBeforeCompile (true unlit) + toneMapped:false.
+    // Minimal fragment: MeshBasic’s full graph (indirect × diffuseColor, envmap, etc.) can skew hue.
+    // We discard to rounded rects, set gl_FragColor from `diffuse` only, then linearToOutputTexel.
     waterMat = new THREE.MeshBasicMaterial({
-      color: 0x3aa6e8,
+      color: 0x4cb8f2,
       fog: false,
       toneMapped: false,
     });
@@ -273,38 +273,32 @@ varying vec4 vWaterR;
 vWaterR = aWaterR;
 `,
       );
-      shader.fragmentShader = shader.fragmentShader.replace(
-        '#include <common>',
-        `#include <common>
+      shader.fragmentShader = `
+uniform vec3 diffuse;
+uniform float opacity;
 varying vec4 vWaterR;
+varying vec2 vUv;
+#include <common>
+#include <clipping_planes_pars_fragment>
+#include <logdepthbuf_pars_fragment>
+#include <colorspace_pars_fragment>
 float sdRoundedBox2D( vec2 p, vec2 b, vec4 r ) {
   r.xy = (p.x>0.0)?r.xy : r.zw;
   r.x  = (p.y>0.0)?r.x  : r.y;
   vec2 q = abs(p)-b+r.x;
   return min(max(q.x,q.y),0.0) + length(max(q,0.0)) - r.x;
 }
-`,
-      );
-      shader.fragmentShader = shader.fragmentShader.replace(
-        '#include <color_fragment>',
-        `vec2 puvW = (vUv - 0.5) * 2.0;
-vec2 pwbW = vec2(puvW.x, -puvW.y);
-float dWaterClip = sdRoundedBox2D( pwbW, vec2(1.0), vWaterR );
-if ( dWaterClip > 0.001 ) discard;
-#include <color_fragment>
-`,
-      );
-      shader.fragmentShader = shader.fragmentShader.replace(
-        '#include <opaque_fragment>',
-        `#ifdef OPAQUE
-diffuseColor.a = 1.0;
-#endif
-gl_FragColor = vec4( diffuse, diffuseColor.a );`,
-      );
-      shader.fragmentShader = shader.fragmentShader.replace(
-        /#include <fog_fragment>/g,
-        '/* water: no fog */',
-      );
+void main() {
+  #include <clipping_planes_fragment>
+  vec2 puvW = (vUv - 0.5) * 2.0;
+  vec2 pwbW = vec2(puvW.x, -puvW.y);
+  float dWaterClip = sdRoundedBox2D( pwbW, vec2(1.0), vWaterR );
+  if ( dWaterClip > 0.001 ) discard;
+  gl_FragColor = vec4( diffuse, 1.0 );
+  #include <logdepthbuf_fragment>
+  gl_FragColor = linearToOutputTexel( gl_FragColor );
+}
+`;
     };
     waterMesh = new THREE.InstancedMesh(waterGeo, waterMat, MAX_WATER);
     waterMesh.receiveShadow = false;
@@ -508,6 +502,31 @@ gl_FragColor = vec4( diffuse, diffuseColor.a );`,
     const ey = Math.min(wy - 1, Math.floor(maxZ / T));
     if (ex < sx || ey < sy) return null;
     return { sx, sy, ex, ey };
+  }
+
+  /**
+   * Frustum ∩ ground plane can under-estimate which tiles are needed at shallow pitch or on hills.
+   * Union with a player-centered footprint so roads/water/soil don’t vanish when orbiting the camera.
+   */
+  function _expandTileRangeForGroundLayers(sx, sy, ex, ey, wx, wy, px, py) {
+    const span = 52 + Math.min(96, Math.floor(_camDist / T));
+    const u0 = Math.max(0, Math.floor(px) - span);
+    const v0 = Math.max(0, Math.floor(py) - span);
+    const u1 = Math.min(wx - 1, Math.ceil(px) + span);
+    const v1 = Math.min(wy - 1, Math.ceil(py) + span);
+    const pad = 14;
+    let sx2 = Math.min(sx, u0) - pad;
+    let sy2 = Math.min(sy, v0) - pad;
+    let ex2 = Math.max(ex, u1) + pad;
+    let ey2 = Math.max(ey, v1) + pad;
+    sx2 = Math.max(0, sx2);
+    sy2 = Math.max(0, sy2);
+    ex2 = Math.min(wx - 1, ex2);
+    ey2 = Math.min(wy - 1, ey2);
+    if (ex2 < sx2 || ey2 < sy2) {
+      return { sx: 0, sy: 0, ex: wx - 1, ey: wy - 1 };
+    }
+    return { sx: sx2, sy: sy2, ex: ex2, ey: ey2 };
   }
 
   function _smoothstep01(edge0, edge1, x) {
@@ -1049,15 +1068,6 @@ gl_FragColor = vec4( diffuse, diffuseColor.a );`,
       const gy = _groundY(node.x, node.y);
       grp.position.set(x, gy, z);
       grp.visible = true;
-      const pct = Math.min(1, node.amount / (node.max || 100));
-      if (!node.construction_active && !node.is_town_hall && !node.is_market) {
-        const bar = new THREE.Mesh(
-          new THREE.BoxGeometry(T - 8, 3, 2),
-          new THREE.MeshBasicMaterial({ color: pct > 0.4 ? 0x40d860 : 0xe07030 }),
-        );
-        bar.position.set(0, 2, T / 2 - 4);
-        grp.add(bar);
-      }
       if (node.owner_name && (node.is_structure || node.is_market)) {
         _spriteText(node.owner_name, x, gy + 48, z, 0xccffaa, false);
       }
@@ -1367,6 +1377,11 @@ gl_FragColor = vec4( diffuse, diffuseColor.a );`,
       ex = Math.min(wx - 1, Math.ceil(px + span));
       ey = Math.min(wy - 1, Math.ceil(py + span));
     }
+    const tr = _expandTileRangeForGroundLayers(sx, sy, ex, ey, wx, wy, px, py);
+    sx = tr.sx;
+    sy = tr.sy;
+    ex = tr.ex;
+    ey = tr.ey;
 
     const gwy = _groundY(px, py);
     horizonGrass.position.set(px * T + T / 2, gwy - 0.35, py * T + T / 2);
