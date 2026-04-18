@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.22] - 2026-04-18
+
+### Changed
+- **Client** (`client/js/input.js`, `client/js/renderer.js`, `client/js/game.js`): **When** **starting** **forward** **or** **backward** **from** **a** **full** **stop** **with** **no** **turn** **keys,** **send** **`face_angle`** **from** **`getCameraFacingAngle()`** **(orbit** **view)** **and** **apply** **it** **optimistically** **so** **the** **barrow** **faces** **into** **the** **screen** **before** **moving**
+- **Server** (`server/game/engine.py`): **On** **`move`**, **apply** **optional** **`face_angle`** **to** **the** **player** **`angle`** **when** **present**
+
 ## [0.12.21] - 2026-04-18
 
 ### Changed

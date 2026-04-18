@@ -1080,6 +1080,14 @@ window.addEventListener('load', () => {
     const canvas = document.getElementById('game');
     Renderer.init(canvas, state);
     Input.init(msg => {
+      if (msg.type === 'move' && msg.face_angle != null && state.player) {
+        let a = Number(msg.face_angle);
+        if (Number.isFinite(a)) {
+          while (a > Math.PI) a -= 2 * Math.PI;
+          while (a < -Math.PI) a += 2 * Math.PI;
+          state.player.angle = a;
+        }
+      }
       WS.send(msg);
     }, handleKey);
 

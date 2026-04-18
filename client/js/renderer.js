@@ -487,6 +487,12 @@ ${sdRoundBoxFn}`,
     return { fx, fz, rx, rz };
   }
 
+  /** Server movement angle (east=0, south=π/2): horizontal view direction into the screen. */
+  function getCameraFacingAngle() {
+    const { fx, fz } = getCameraMoveBasis();
+    return Math.atan2(fz, fx);
+  }
+
   const _NDC_FRUSTUM_SAMPLES = [
     [-1, -1], [1, -1], [1, 1], [-1, 1],
     [0, -1], [1, 0], [0, 1], [-1, 0], [0, 0],
@@ -1650,5 +1656,5 @@ ${sdRoundBoxFn}`,
     }
   }
 
-  return { init, draw, getCameraMoveBasis };
+  return { init, draw, getCameraMoveBasis, getCameraFacingAngle };
 })();

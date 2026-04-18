@@ -531,6 +531,19 @@ class GameEngine:
                 pl["_input_turn"] = float(msg.get("turn", 0) or 0)
                 pl["_input_fwd"] = max(-1.0, min(1.0, pl["_input_fwd"]))
                 pl["_input_turn"] = max(-1.0, min(1.0, pl["_input_turn"]))
+                # Client sends when starting fwd/back from rest: face orbit camera, then drive.
+                fa = msg.get("face_angle")
+                if fa is not None:
+                    try:
+                        a = float(fa)
+                        if math.isfinite(a):
+                            while a > math.pi:
+                                a -= 2.0 * math.pi
+                            while a < -math.pi:
+                                a += 2.0 * math.pi
+                            pl["angle"] = a
+                    except (TypeError, ValueError):
+                        pass
         elif t == "sell":           await self._sell_npc_market(player_id)
         elif t == "buy_parcel":     await self._buy_parcel(player_id, msg.get("parcel_id"))
         elif t == "build":          await self._build(player_id, msg.get("structure_type"))

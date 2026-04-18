@@ -6,6 +6,8 @@ const Input = (() => {
   let sendFn      = null;
   let onKey       = null;
   let autopilotBlocked = false;
+  /** Last sampled fwd (–1..1) for edge detect — snap facing when starting drive from rest. */
+  let lastFwdSample = 0;
 
   const held = {};
 
@@ -26,8 +28,8 @@ const Input = (() => {
   }
 
   /**
-   * Tank-style: Up/Down = forward/back along wheelbarrow facing; Left/Right = rotate.
-   * Server integrates continuously (any angle).
+   * Up/Down = forward/back; Left/Right = turn. Starting fwd/back from rest (no turn) snaps facing
+   * to the orbit camera via face_angle, then drives — so you can point the view and drive into it.
    */
   function update(now, player, world) {
     if (!sendFn || autopilotBlocked) return;
@@ -43,8 +45,22 @@ const Input = (() => {
     fwd = Math.max(-1, Math.min(1, fwd));
     turn = Math.max(-1, Math.min(1, turn));
 
+    const msg = { type: 'move', fwd, turn };
+    // From a full stop, align barrow to orbit camera before driving (not tank-facing).
+    if (
+      fwd !== 0
+      && lastFwdSample === 0
+      && turn === 0
+      && typeof Renderer !== 'undefined'
+      && typeof Renderer.getCameraFacingAngle === 'function'
+    ) {
+      const a = Renderer.getCameraFacingAngle();
+      if (Number.isFinite(a)) msg.face_angle = a;
+    }
+    lastFwdSample = fwd;
+
     lastSend = now;
-    sendFn({ type: 'move', fwd, turn });
+    sendFn(msg);
   }
 
   function setAutopilotBlocked(v) {
@@ -53,6 +69,7 @@ const Input = (() => {
 
   function clearHeldKeys() {
     for (const k of Object.keys(held)) delete held[k];
+    lastFwdSample = 0;
   }
 
   /**
