@@ -241,60 +241,23 @@ const Renderer = (() => {
     grassMesh.receiveShadow = true;
     grassMesh.castShadow = false;
     grassMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    grassMesh.renderOrder = 0;
     groundGroup.add(grassMesh);
 
     const waterGeo = new THREE.PlaneGeometry(T, T);
     waterGeo.rotateX(-Math.PI / 2);
-    waterGeo.setAttribute(
-      'aWaterR',
-      new THREE.InstancedBufferAttribute(new Float32Array(MAX_WATER * 4), 4),
-    );
-    // Rounded mask uses Inigo’s sdRoundBox in UV space: p = (vUv-0.5)*2 with +y = vUv up (no Y flip).
-    // vec4 r order (bl, br, tr, tl) = (rSW, rSE, rNE, rNW) matching tile corners at UV (0,0),(1,0),(1,1),(0,1).
-    // Do not call linearToOutputTexel here — it mixed badly with this minimal shader and read olive/green.
+    // Full-tile unlit quads — no fragment discard (rounded SDF was error-prone and showed green behind).
     waterMat = new THREE.MeshBasicMaterial({
-      color: 0x4cb8f2,
+      color: 0x4ec8ff,
       fog: false,
       toneMapped: false,
     });
-    waterMat.onBeforeCompile = (shader) => {
-      shader.vertexShader = shader.vertexShader.replace(
-        '#include <common>',
-        `#include <common>
-attribute vec4 aWaterR;
-varying vec4 vWaterR;
-`,
-      );
-      shader.vertexShader = shader.vertexShader.replace(
-        '#include <uv_vertex>',
-        `#include <uv_vertex>
-vWaterR = aWaterR;
-`,
-      );
-      shader.fragmentShader = `
-varying vec4 vWaterR;
-varying vec2 vUv;
-#include <common>
-#include <clipping_planes_pars_fragment>
-#include <logdepthbuf_pars_fragment>
-float sdRoundedBox2D( vec2 p, vec2 b, vec4 r ) {
-  r.xy = (p.x>0.0)?r.xy : r.zw;
-  r.x  = (p.y>0.0)?r.x  : r.y;
-  vec2 q = abs(p)-b+r.x;
-  return min(max(q.x,q.y),0.0) + length(max(q,0.0)) - r.x;
-}
-void main() {
-  #include <clipping_planes_fragment>
-  vec2 p = (vUv - 0.5) * 2.0;
-  float dWaterClip = sdRoundedBox2D( p, vec2(1.0), vWaterR );
-  if ( dWaterClip > 0.001 ) discard;
-  gl_FragColor = vec4( 0.22, 0.62, 0.98, 1.0 );
-  #include <logdepthbuf_fragment>
-}
-`;
-    };
+    if (THREE.SRGBColorSpace !== undefined) {
+      waterMat.colorSpace = THREE.SRGBColorSpace;
+    }
     waterMesh = new THREE.InstancedMesh(waterGeo, waterMat, MAX_WATER);
     waterMesh.receiveShadow = false;
+    waterMesh.renderOrder = 2;
     waterMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     groundGroup.add(waterMesh);
 
@@ -577,10 +540,6 @@ void main() {
   function _waterAndRoadsInView(sx, sy, ex, ey) {
     let wi = 0;
     let ri = 0;
-    const waterSet = new Set((s.water_tiles || []).map((w) => `${w.x},${w.y}`));
-    const hasW = (x, y) => waterSet.has(`${x},${y}`);
-    const waterRAttr = waterMesh.geometry.getAttribute('aWaterR');
-    const waterRArr = waterRAttr.array;
     const pushW = (tx, ty) => {
       if (wi >= MAX_WATER) return;
       const { x, z } = _worldXZ(tx, ty);
@@ -588,24 +547,7 @@ void main() {
       _dummy.rotation.set(0, 0, 0);
       _dummy.scale.set(1, 1, 1);
       _dummy.updateMatrix();
-      waterMesh.setMatrixAt(wi, _dummy.matrix);
-      const wN = hasW(tx, ty - 1);
-      const wE = hasW(tx + 1, ty);
-      const wS = hasW(tx, ty + 1);
-      const wW = hasW(tx - 1, ty);
-      const iso = !(wN || wE || wS || wW);
-      const Rc = iso ? 0.48 : 0.42;
-      const rSW = (wW && wS) ? 0 : Rc;
-      const rSE = (wE && wS) ? 0 : Rc;
-      const rNE = (wE && wN) ? 0 : Rc;
-      const rNW = (wW && wN) ? 0 : Rc;
-      const o = wi * 4;
-      // Inigo sdRoundBox vec4: r.xy = east (NE, SE), r.zw = west (NW, SW) for p = (vUv-0.5)*2, +y up
-      waterRArr[o] = rNE;
-      waterRArr[o + 1] = rSE;
-      waterRArr[o + 2] = rNW;
-      waterRArr[o + 3] = rSW;
-      wi += 1;
+      waterMesh.setMatrixAt(wi++, _dummy.matrix);
     };
     const pushR = (tx, ty) => {
       if (ri >= MAX_ROAD) return;
@@ -650,7 +592,6 @@ void main() {
     waterMesh.count = wi;
     roadMesh.count = ri;
     waterMesh.instanceMatrix.needsUpdate = true;
-    waterRAttr.needsUpdate = true;
     roadMesh.instanceMatrix.needsUpdate = true;
   }
 

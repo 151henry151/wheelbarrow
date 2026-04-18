@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.8] - 2026-04-17
+
+### Changed
+- **Client** (`client/js/renderer.js`): **Water** — remove **rounded-rect SDF / `discard`** path; use **plain `MeshBasicMaterial`** full-tile planes, **`toneMapped: false`**, **`colorSpace: SRGBColorSpace`**, bright **`0x4ec8ff`**, **`renderOrder` 2** so rivers/ponds render as **reliable blue** (rounded corners deferred until a safer approach)
+
 ## [0.12.7] - 2026-04-17
 
 ### Changed
