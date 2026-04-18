@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.42] - 2026-04-16
+
+### Fixed
+- **Server** (`server/main.py`): **Multiplex** **outbound** **queue** **`get`** **with** **`websocket.receive_json`** **via** **`asyncio.wait`** **in** **the** **same** **task** **that** **calls** **`send_json`** **—** **removes** **the** **separate** **outbound** **pump** **task** **that** **could** **deadlock** **with** **receive** **on** **ASGI** **and** **leave** **`tick`** **messages** **undelivered** **(wheelbarrow** **stuck** **in** **place)**
+
 ## [0.12.41] - 2026-04-18
 
 ### Fixed

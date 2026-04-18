@@ -71,11 +71,54 @@ async def websocket_endpoint(websocket: WebSocket, token: str):
             pass
         return
 
-    engine.add_socket(player["id"], websocket)
+    # Game loop enqueues JSON via put_nowait; we send from this same task so send/receive obey
+    # ASGI websocket expectations. Multiplex with asyncio.wait so we never block only on receive
+    # while ticks pile up (separate outbound task can deadlock with receive on some servers).
+    out_q: asyncio.Queue = asyncio.Queue()
+
+    engine.add_socket(player["id"], websocket, out_q)
 
     try:
         while True:
-            msg = await websocket.receive_json()
+            out_task = asyncio.create_task(out_q.get())
+            in_task = asyncio.create_task(websocket.receive_json())
+            _, pending = await asyncio.wait(
+                {out_task, in_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            for p in pending:
+                p.cancel()
+            for p in pending:
+                try:
+                    await p
+                except asyncio.CancelledError:
+                    pass
+
+            payload = None
+            try:
+                payload = out_task.result()
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                logging.exception("wheelbarrow: outbound queue get failed")
+                break
+
+            if payload is not None:
+                await websocket.send_json(payload)
+                while True:
+                    try:
+                        p2 = out_q.get_nowait()
+                    except asyncio.QueueEmpty:
+                        break
+                    await websocket.send_json(p2)
+                continue
+
+            try:
+                msg = in_task.result()
+            except asyncio.CancelledError:
+                continue
+            except WebSocketDisconnect:
+                break
             try:
                 await engine.handle_input(player["id"], msg)
             except Exception:
@@ -87,8 +130,6 @@ async def websocket_endpoint(websocket: WebSocket, token: str):
                     })
                 except Exception:
                     pass
-            # Yield so the game loop task can run between bursts of client messages (move spam at
-            # ~30 Hz can otherwise starve asyncio scheduling and delay tick/broadcast for seconds).
             await asyncio.sleep(0)
     except WebSocketDisconnect:
         pass

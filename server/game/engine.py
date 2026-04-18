@@ -146,6 +146,10 @@ class GameEngine:
     def __init__(self):
         self.players:    dict[int, dict]     = {}
         self.sockets:    dict[int, WebSocket] = {}
+        # When set, outbound JSON is put_nowait here and drained by the WebSocket endpoint task.
+        # Avoids calling ws.send_json from the game-loop task while receive_json blocks in another
+        # task (can stall or reorder ASGI websocket I/O on some servers).
+        self.out_queues: dict[int, asyncio.Queue] = {}
         self.tokens:     dict[str, int]      = {}
         self.nodes:      dict[int, dict]     = {}    # resource nodes
         self.structures: dict[int, dict]     = {}    # player structures
@@ -565,11 +569,14 @@ class GameEngine:
         pid = self.tokens.get(token)
         return self.players.get(pid) if pid else None
 
-    def add_socket(self, player_id: int, ws: WebSocket):
+    def add_socket(self, player_id: int, ws: WebSocket, out_queue: asyncio.Queue | None = None):
         self.sockets[player_id] = ws
+        if out_queue is not None:
+            self.out_queues[player_id] = out_queue
 
     async def remove_player(self, player_id: int):
         self.sockets.pop(player_id, None)
+        self.out_queues.pop(player_id, None)
         player = self.players.get(player_id)
         if player:
             await queries.save_player(player)
@@ -2032,6 +2039,20 @@ class GameEngine:
 
     async def _send_json_ws_safe(self, ws: WebSocket, payload: dict, *, pid: int | None = None) -> bool:
         """Send JSON; on failure drop the socket so broadcasts do not error forever."""
+        if pid is not None and pid in self.out_queues:
+            q = self.out_queues[pid]
+            try:
+                q.put_nowait(payload)
+                return True
+            except asyncio.QueueFull:
+                logging.warning(
+                    "wheelbarrow: outbound WS queue full for player %s; dropping connection",
+                    pid,
+                )
+                self.sockets.pop(pid, None)
+                self.out_queues.pop(pid, None)
+                asyncio.create_task(self._close_ws_noexcept(ws))
+                return False
         try:
             await ws.send_json(payload)
             return True
@@ -2039,6 +2060,7 @@ class GameEngine:
             logging.exception("wheelbarrow: websocket send failed for player %s", pid)
             if pid is not None:
                 self.sockets.pop(pid, None)
+                self.out_queues.pop(pid, None)
             asyncio.create_task(self._close_ws_noexcept(ws))
             return False
 
