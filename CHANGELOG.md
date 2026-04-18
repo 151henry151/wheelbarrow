@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.11] - 2026-04-17
+
+### Changed
+- **Client** (`client/js/renderer.js`): **Water** — inject **Inigo `sdRoundBox`** `discard` into the **default** `MeshBasicMaterial` fragment shader instead of replacing the whole shader, so **`colorspace_fragment`** / **`linearToOutputTexel`** run on **`diffuse`** and water reads **blue** again (full custom fragment had skipped output color handling)
+
 ## [0.12.10] - 2026-04-17
 
 ### Changed

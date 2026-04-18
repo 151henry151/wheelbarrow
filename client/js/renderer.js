@@ -259,7 +259,9 @@ const Renderer = (() => {
     if (THREE.SRGBColorSpace !== undefined) {
       waterMat.colorSpace = THREE.SRGBColorSpace;
     }
-    // Analytical rounded rect in UV space — smooth arcs at pond shores; straight joints between water tiles.
+    // Analytical rounded rect in UV space — inject SDF discard only; keep default MeshBasic tail
+    // (opaque / tonemapping / colorspace chunks). Replacing the whole fragment shader skipped
+    // linearToOutputTexel and produced wrong hues (often reading as green vs grass).
     waterMat.onBeforeCompile = (shader) => {
       shader.vertexShader = shader.vertexShader.replace(
         '#include <common>',
@@ -274,29 +276,28 @@ varying vec4 vWaterR;
 vWaterR = aWaterR;
 `,
       );
-      shader.fragmentShader = `
-varying vec4 vWaterR;
-varying vec2 vUv;
-#include <common>
-#include <clipping_planes_pars_fragment>
-#include <logdepthbuf_pars_fragment>
-// https://iquilezles.org/articles/distfunctions2d/ — vec4 = (NE, SE, NW, SW); p in [-1,1]^2, +y toward UV v=1
+      const sdRoundBoxFn = `
+// https://iquilezles.org/articles/distfunctions2d/ — vec4 = (NE, SE, NW, SW); p in [-1,1]^2
 float sdRoundBox( vec2 p, vec2 b, vec4 r ) {
   r.xy = (p.x>0.0)?r.xy : r.zw;
   r.x  = (p.y>0.0)?r.x  : r.y;
   vec2 q = abs(p)-b+r.x;
   return min(max(q.x,q.y),0.0) + length(max(q,0.0)) - r.x;
 }
-void main() {
-  #include <clipping_planes_fragment>
-  vec2 puv = (vUv - 0.5) * 2.0;
-  vec2 p = vec2(puv.x, puv.y);
-  float d = sdRoundBox( p, vec2(1.0), vWaterR );
-  if ( d > 0.0 ) discard;
-  gl_FragColor = vec4( 0.26, 0.68, 0.99, 1.0 );
-  #include <logdepthbuf_fragment>
-}
 `;
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <clipping_planes_pars_fragment>',
+        `#include <clipping_planes_pars_fragment>
+varying vec4 vWaterR;
+${sdRoundBoxFn}`,
+      );
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <clipping_planes_fragment>',
+        `#include <clipping_planes_fragment>
+	vec2 puvW = (vUv - 0.5) * 2.0;
+	if ( sdRoundBox( puvW, vec2(1.0), vWaterR ) > 0.0 ) discard;
+`,
+      );
     };
     waterMesh = new THREE.InstancedMesh(waterGeo, waterMat, MAX_WATER);
     waterMesh.receiveShadow = false;
