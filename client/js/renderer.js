@@ -268,12 +268,14 @@ const Renderer = (() => {
         `#include <common>
 attribute vec4 aWaterR;
 varying vec4 vWaterR;
+varying vec2 vWaterUv;
 `,
       );
       shader.vertexShader = shader.vertexShader.replace(
         '#include <uv_vertex>',
         `#include <uv_vertex>
 vWaterR = aWaterR;
+vWaterUv = uv;
 `,
       );
       const sdRoundBoxFn = `
@@ -289,12 +291,13 @@ float sdRoundBox( vec2 p, vec2 b, vec4 r ) {
         '#include <clipping_planes_pars_fragment>',
         `#include <clipping_planes_pars_fragment>
 varying vec4 vWaterR;
+varying vec2 vWaterUv;
 ${sdRoundBoxFn}`,
       );
       shader.fragmentShader = shader.fragmentShader.replace(
         '#include <clipping_planes_fragment>',
         `#include <clipping_planes_fragment>
-	vec2 puvW = (vUv - 0.5) * 2.0;
+	vec2 puvW = (vWaterUv - 0.5) * 2.0;
 	if ( sdRoundBox( puvW, vec2(1.0), vWaterR ) > 0.0 ) discard;
 `,
       );

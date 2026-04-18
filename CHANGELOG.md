@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.12] - 2026-04-17
+
+### Changed
+- **Client** (`client/js/renderer.js`): **Water** — pass **`vWaterUv`** from vertex **`uv`** for the **rounded-rect** `discard`; **`MeshBasicMaterial`** without a map **does not declare** **`vUv`** in the fragment shader, which **broke** **fragment** **compilation** and **disabled** **rounded** **corners** / **correct** **color**
+
 ## [0.12.11] - 2026-04-17
 
 ### Changed
