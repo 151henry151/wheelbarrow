@@ -61,7 +61,8 @@ from server.game.construction import (
 from server.db import queries
 from server.config import settings
 
-logger = logging.getLogger("uvicorn.error")
+# Spatial index chunk size for wild resource nodes (viewport queries in _broadcast_state).
+WILD_NODE_CHUNK = 64
 
 
 def _bucket_total(bucket: dict) -> float:
@@ -181,6 +182,10 @@ class GameEngine:
         self._last_persist       = time.monotonic()
         self._last_market_drift  = time.monotonic()
         self._last_election_check = time.monotonic()
+        # Cached tile set for movement collision; invalidate when structures/piles change.
+        self._movement_blocked_cache: set[tuple[int, int]] | None = None
+        # Wild nodes are static after load — chunk id -> list of node ids for viewport culling.
+        self._wild_node_chunks: dict[tuple[int, int], list[int]] = {}
 
     # ------------------------------------------------------------------ load
 
@@ -223,6 +228,7 @@ class GameEngine:
         for pile in await queries.load_all_piles():
             key = (pile["x"], pile["y"])
             self.piles.setdefault(key, {})[pile["resource_type"]] = dict(pile)
+        self._rebuild_wild_node_chunk_index()
         await queries.ensure_crop_winter_dead_column()
         await queries.ensure_soil_tiles_table()
         await queries.cleanup_legacy_harvested_crop_rows()
@@ -391,6 +397,7 @@ class GameEngine:
             if not pile_map:
                 del self.piles[(tx, ty)]
         if rotted_tiles:
+            self._invalidate_movement_blocked_cache()
             await self._broadcast_all({
                 "type": "notice",
                 "msg": "Winter — uncovered wheat piles have rotted into compost where they lay.",
@@ -454,15 +461,47 @@ class GameEngine:
         pid = self.parcel_at.get((tx, ty))
         return self.world_parcels.get(pid) if pid else None
 
+    def _invalidate_movement_blocked_cache(self) -> None:
+        self._movement_blocked_cache = None
+
     def _movement_blocked_tiles(self) -> set[tuple[int, int]]:
         """Tiles wheelbarrows cannot enter: nodes, structures, tiles with resource piles."""
+        if self._movement_blocked_cache is not None:
+            return self._movement_blocked_cache
         blocked: set[tuple[int, int]] = set()
         for n in {**self.nodes, **self.structures}.values():
             blocked.add((int(n["x"]), int(n["y"])))
         for (px, py), pmap in self.piles.items():
             if any(float(p.get("amount", 0) or 0) > 0 for p in pmap.values()):
                 blocked.add((px, py))
+        self._movement_blocked_cache = blocked
         return blocked
+
+    def _rebuild_wild_node_chunk_index(self) -> None:
+        """Wild resource node positions are fixed after load — used to cull viewport tick payloads."""
+        chunks: dict[tuple[int, int], list[int]] = {}
+        for nid, n in self.nodes.items():
+            ck = (int(n["x"]) // WILD_NODE_CHUNK, int(n["y"]) // WILD_NODE_CHUNK)
+            chunks.setdefault(ck, []).append(nid)
+        self._wild_node_chunks = chunks
+
+    def _nearby_wild_nodes_wire(self, px: int, py: int) -> list[dict]:
+        """O(chunks touched) instead of scanning every wild node each tick."""
+        R = VIEWPORT_RADIUS
+        x0, x1 = px - R, px + R
+        y0, y1 = py - R, py + R
+        c0x, c1x = x0 // WILD_NODE_CHUNK, x1 // WILD_NODE_CHUNK
+        c0y, c1y = y0 // WILD_NODE_CHUNK, y1 // WILD_NODE_CHUNK
+        out: list[dict] = []
+        for cx in range(c0x, c1x + 1):
+            for cy in range(c0y, c1y + 1):
+                for nid in self._wild_node_chunks.get((cx, cy), ()):
+                    n = self.nodes.get(nid)
+                    if not n:
+                        continue
+                    if abs(int(n["x"]) - px) <= R and abs(int(n["y"]) - py) <= R:
+                        out.append(self._node_wire(n))
+        return out
 
     def _pick_adjacent_structure(
         self,
@@ -572,13 +611,11 @@ class GameEngine:
         return self.players.get(pid) if pid else None
 
     def add_socket(self, player_id: int, ws: WebSocket, out_queue: asyncio.Queue | None = None):
-        logger.info("DBG add_socket pid=%s engine_id=%s", player_id, id(self))
         self.sockets[player_id] = ws
         if out_queue is not None:
             self.out_queues[player_id] = out_queue
 
     async def remove_player(self, player_id: int):
-        logger.info("DBG remove_player pid=%s", player_id)
         self.sockets.pop(player_id, None)
         self.out_queues.pop(player_id, None)
         player = self.players.get(player_id)
@@ -594,8 +631,6 @@ class GameEngine:
             if pl:
                 pl["_input_fwd"] = float(msg.get("fwd", 0) or 0)
                 pl["_input_turn"] = float(msg.get("turn", 0) or 0)
-                if pl["_input_fwd"] != 0 or pl["_input_turn"] != 0:
-                    logger.info("DBG handle_input MOVE pid=%s fwd=%.2f turn=%.2f", player_id, pl["_input_fwd"], pl["_input_turn"])
                 pl["_input_fwd"] = max(-1.0, min(1.0, pl["_input_fwd"]))
                 pl["_input_turn"] = max(-1.0, min(1.0, pl["_input_turn"]))
                 # Client sends when starting fwd/back from rest: face orbit camera, then drive.
@@ -769,6 +804,7 @@ class GameEngine:
         )
         node = self._struct_to_node(struct_row)
         self.structures[node["id"]] = node
+        self._invalidate_movement_blocked_cache()
         await queries.save_player(player)
 
         await self._send(player_id, {
@@ -878,6 +914,7 @@ class GameEngine:
                 parcel_id, player_id, tx, ty, rtype, new_amt, existing.get("sell_price"),
             )
             self.piles[key][rtype] = dict(pile_row)
+        self._invalidate_movement_blocked_cache()
 
     async def _cancel_construction(self, player_id: int):
         player = self.players.get(player_id)
@@ -904,6 +941,7 @@ class GameEngine:
         tx, ty = int(node["x"]), int(node["y"])
         await queries.delete_structure(sid)
         del self.structures[sid]
+        self._invalidate_movement_blocked_cache()
         refund = {k: float(v) for k, v in deposited.items() if float(v) > 0}
         await self._refund_materials_to_piles(player_id, tx, ty, refund)
         await self._send(player_id, {
@@ -968,6 +1006,7 @@ class GameEngine:
         tx, ty = int(node["x"]), int(node["y"])
         await queries.delete_structure(sid)
         del self.structures[sid]
+        self._invalidate_movement_blocked_cache()
         await self._refund_materials_to_piles(player_id, tx, ty, refund)
         await self._send(player_id, {
             "type": "notice",
@@ -1196,6 +1235,7 @@ class GameEngine:
         if silo_put > 0:
             parts.append(f"Stored {round(silo_put, 1)} wheat in the silo")
         parts.append(f"piled {round(total, 1)} units here — [E] to set a sell price on your own land")
+        self._invalidate_movement_blocked_cache()
         await self._send(player_id, {"type": "notice", "msg": " — ".join(parts)})
 
     # ---- set pile price -----------------------------------------------------
@@ -1278,6 +1318,7 @@ class GameEngine:
         player.setdefault("_pending_pile_loads", []).append({
             "x": key[0], "y": key[1], "rtype": resource_type, "remaining": float(can),
         })
+        self._invalidate_movement_blocked_cache()
         tax_str = f" (+{tax}c town tax)" if tax else ""
         await self._send(player_id, {"type": "notice",
             "msg": f"Paid {cost}c for {can} {resource_type}. Stand on or next to the pile to load into your barrow.{tax_str}"})
@@ -1831,18 +1872,13 @@ class GameEngine:
 
     async def tick(self, resource_tick_s: int, persist_interval_s: int):
         now = time.monotonic()
-        logger.info("DBG tick_start sockets=%s engine_id=%s", list(self.sockets.keys()), id(self))
         dt = settings.game_tick_ms / 1000.0
-        _t0 = time.monotonic()
         blocked_movement = self._movement_blocked_tiles()
-        logger.info("DBG blocked_tiles count=%d built_in=%.4fs", len(blocked_movement), time.monotonic() - _t0)
         for pid in list(self.sockets.keys()):
             pl = self.players.get(pid)
             if not pl:
                 continue
             try:
-                if pl.get("_input_fwd", 0) != 0 or pl.get("_input_turn", 0) != 0:
-                    logger.info("DBG tick pid=%s fwd=%.2f turn=%.2f pos=(%.2f,%.2f)", pid, pl.get("_input_fwd", 0), pl.get("_input_turn", 0), float(pl.get("x", 0)), float(pl.get("y", 0)))
                 ev = integrate_player_movement(
                     pl, dt, self.water_tiles, self.bridge_tiles, blocked_movement, self.road_tiles,
                 )
@@ -2001,6 +2037,7 @@ class GameEngine:
                     owner = self.players.get(node["owner_id"])
                     if owner and node["owner_id"] != player["id"]:
                         owner["coins"] += node.get("collect_fee", 1)
+        self._invalidate_movement_blocked_cache()
 
     async def _do_market_drift(self):
         for rtype, base in MARKET_BASE_PRICES.items():
@@ -2084,7 +2121,6 @@ class GameEngine:
     async def _broadcast_state(self):
         if not self.sockets:
             return
-        _bs0 = time.monotonic()
         all_players = self._connected_players_wire()
         all_structs  = [self._node_wire(n) for n in self.structures.values()]
 
@@ -2093,11 +2129,8 @@ class GameEngine:
             if not player:
                 continue
             px, py = player_tile_xy(player)
-            # Viewport-culled nodes / piles / crops (integer tile — matches movement grid)
-            nearby_nodes = [
-                self._node_wire(n) for n in self.nodes.values()
-                if abs(n["x"] - px) <= VIEWPORT_RADIUS and abs(n["y"] - py) <= VIEWPORT_RADIUS
-            ]
+            # Viewport-culled wild nodes (chunk index) / piles / crops (integer tile — matches grid)
+            nearby_nodes = self._nearby_wild_nodes_wire(px, py)
             nearby_piles = [
                 self._pile_wire(pile, rtype)
                 for (tile_key), pile_map in self.piles.items()
@@ -2136,7 +2169,6 @@ class GameEngine:
                 },
                 pid=pid,
             )
-        logger.info("DBG broadcast_state took=%.4fs players=%d", time.monotonic() - _bs0, len(self.sockets))
 
     async def _broadcast_all(self, msg: dict):
         for pid, ws in list(self.sockets.items()):
@@ -2315,10 +2347,7 @@ class GameEngine:
     def full_state(self, player_id: int) -> dict:
         player = self.players[player_id]
         px, py = player_tile_xy(player)
-        nearby_nodes = [
-            self._node_wire(n) for n in self.nodes.values()
-            if abs(n["x"]-px) <= VIEWPORT_RADIUS and abs(n["y"]-py) <= VIEWPORT_RADIUS
-        ]
+        nearby_nodes = self._nearby_wild_nodes_wire(px, py)
         nearby_piles = [
             self._pile_wire(pile, rtype)
             for tile_key, pile_map in self.piles.items()

@@ -121,11 +121,8 @@ async def websocket_endpoint(websocket: WebSocket, token: str):
                     except asyncio.QueueEmpty:
                         break
                     await websocket.send_json(p2)
-                # asyncio.wait(FIRST_COMPLETED) returns ALL done tasks, not just one.
-                # If in_task also completed in the same event-loop turn (client sent a
-                # message at the exact moment the tick arrived), its result is in the
-                # done set and would be silently discarded by the continue below.
-                # Process it now so move messages are never lost to this race.
+                # If both out_task and in_task completed in the same loop turn, only one
+                # "wins" asyncio.wait; process the inbound move so it is not dropped.
                 if in_task.done():
                     _disconnect = False
                     try:
