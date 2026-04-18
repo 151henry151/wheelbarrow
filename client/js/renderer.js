@@ -255,10 +255,12 @@ const Renderer = (() => {
     waterMat = new THREE.MeshPhongMaterial({
       color: 0x1c5ca0,
       emissive: 0x0a3058,
-      transparent: true,
-      opacity: 0.72,
+      // Opaque: semi-transparent water blended ~30% grass under each tile → muddy dark green.
+      transparent: false,
+      opacity: 1.0,
       shininess: 90,
     });
+    waterMat.fog = false;
     waterMat.onBeforeCompile = (shader) => {
       shader.vertexShader = shader.vertexShader.replace(
         '#include <common>',

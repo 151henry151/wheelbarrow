@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.2] - 2026-04-16
+
+### Changed
+- **Client** (`client/js/renderer.js`): **Water** — use **opaque** surface (`opacity: 1`, `transparent: false`) so color does not blend with green grass tiles below; set **`fog: false`** on water for stable blue at distance (shape still uses fragment `discard` for rounded corners)
+
 ## [0.12.1] - 2026-04-16
 
 ### Changed
