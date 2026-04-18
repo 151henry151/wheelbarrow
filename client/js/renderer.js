@@ -5,8 +5,8 @@
 /* global THREE, Terrain */
 const Renderer = (() => {
   const T = 32;
-  /** Road quads extend past tile borders so adjacent instances overlap and grass seams do not show. */
-  const ROAD_TILE_OVERLAP = 0.22;
+  /** Road planes extend well past tile edges (tile pitch is {@link T}) so neighbors overlap into one continuous path. */
+  const ROAD_TILE_OVERLAP = 10;
   /** Water plane is larger than a tile so shader can draw fillets past |p|=1 onto grass. */
   const WATER_QUAD_SCALE = 1.42;
 
@@ -360,6 +360,7 @@ ${sdRoundBoxFn}`,
     roadMesh = new THREE.InstancedMesh(roadGeo, roadMat, MAX_ROAD);
     roadMesh.receiveShadow = true;
     roadMesh.castShadow = true;
+    roadMesh.renderOrder = 1;
     roadMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     groundGroup.add(roadMesh);
 
@@ -769,7 +770,7 @@ ${sdRoundBoxFn}`,
       if (ri >= MAX_ROAD) return;
       if (bridgeSet.has(`${tx},${ty}`)) return;
       const { x, z } = _worldXZ(tx, ty);
-      _dummy.position.set(x, _groundY(tx, ty) + 0.55, z);
+      _dummy.position.set(x, _groundY(tx, ty) + 0.62, z);
       _dummy.rotation.set(-Math.PI / 2, 0, 0);
       _dummy.scale.set(1, 1, 1);
       _dummy.updateMatrix();

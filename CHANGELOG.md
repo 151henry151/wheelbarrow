@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.33] - 2026-04-18
+
+### Changed
+- **Client** (`client/js/renderer.js`): **Increase** **road** **tile** **overlap** **and** **draw** **order** **so** **dirt** **paths** **read** **as** **continuous** **ribbons** **instead** **of** **separated** **squares**
+
 ## [0.12.32] - 2026-04-18
 
 ### Added
