@@ -572,11 +572,13 @@ class GameEngine:
         return self.players.get(pid) if pid else None
 
     def add_socket(self, player_id: int, ws: WebSocket, out_queue: asyncio.Queue | None = None):
+        logger.info("DBG add_socket pid=%s engine_id=%s", player_id, id(self))
         self.sockets[player_id] = ws
         if out_queue is not None:
             self.out_queues[player_id] = out_queue
 
     async def remove_player(self, player_id: int):
+        logger.info("DBG remove_player pid=%s", player_id)
         self.sockets.pop(player_id, None)
         self.out_queues.pop(player_id, None)
         player = self.players.get(player_id)
@@ -1831,7 +1833,7 @@ class GameEngine:
         now = time.monotonic()
         dt = settings.game_tick_ms / 1000.0
         blocked_movement = self._movement_blocked_tiles()
-        logger.info("DBG tick_start sockets=%s", list(self.sockets.keys()))
+        logger.info("DBG tick_start sockets=%s engine_id=%s", list(self.sockets.keys()), id(self))
         for pid in list(self.sockets.keys()):
             pl = self.players.get(pid)
             if not pl:
