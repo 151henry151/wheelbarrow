@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.51] - 2026-04-18
+
+### Fixed
+- **Server** (`server/game/engine.py`): **Chunk-index** **`world_roads`** **for** **`tick`** **/** **`init`** **viewport** **lists** **—** **stop** **O(|all road tiles|)** **scans** **every** **tick** **that** **starved** **the** **asyncio** **loop** **and** **stopped** **WebSocket** **`tick`** **delivery**
+- **Server** (`server/game/tick.py`): **Log** **warning** **when** **a** **`tick`** **takes** **>200ms**
+
 ## [0.12.50] - 2026-04-18
 
 ### Fixed

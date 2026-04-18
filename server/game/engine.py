@@ -186,6 +186,8 @@ class GameEngine:
         self._movement_blocked_cache: set[tuple[int, int]] | None = None
         # Wild nodes are static after load — chunk id -> list of node ids for viewport culling.
         self._wild_node_chunks: dict[tuple[int, int], list[int]] = {}
+        # Same for dirt roads — full scans of road_tiles each tick blocked the event loop (no WS ticks).
+        self._road_chunks: dict[tuple[int, int], list[tuple[int, int]]] = {}
 
     # ------------------------------------------------------------------ load
 
@@ -290,6 +292,8 @@ class GameEngine:
         self._last_market_drift = _now
         self._last_election_check = _now
         self._last_persist = _now
+
+        self._rebuild_road_chunk_index()
 
     def _struct_to_node(self, struct: dict) -> dict:
         sdef = STRUCTURE_DEFS.get(struct["structure_type"], {})
@@ -439,6 +443,7 @@ class GameEngine:
         if added:
             await queries.insert_road_bulk(added)
             self._invalidate_movement_blocked_cache()
+            self._rebuild_road_chunk_index()
 
     def _player_can_free_pick_pile(self, player: dict, pile: dict) -> bool:
         """Timed pickup into barrow without going through buy flow."""
@@ -493,6 +498,29 @@ class GameEngine:
             ck = (int(n["x"]) // WILD_NODE_CHUNK, int(n["y"]) // WILD_NODE_CHUNK)
             chunks.setdefault(ck, []).append(nid)
         self._wild_node_chunks = chunks
+
+    def _rebuild_road_chunk_index(self) -> None:
+        """Chunk index for world_roads — viewport queries avoid O(all roads) per tick per player."""
+        chunks: dict[tuple[int, int], list[tuple[int, int]]] = {}
+        for rx, ry in self.road_tiles:
+            ck = (rx // WILD_NODE_CHUNK, ry // WILD_NODE_CHUNK)
+            chunks.setdefault(ck, []).append((rx, ry))
+        self._road_chunks = chunks
+
+    def _nearby_roads_wire(self, px: int, py: int) -> list[dict]:
+        """Road tiles near the player for rendering — O(chunks) not O(|road_tiles|)."""
+        R = VIEWPORT_RADIUS
+        x0, x1 = px - R, px + R
+        y0, y1 = py - R, py + R
+        c0x, c1x = x0 // WILD_NODE_CHUNK, x1 // WILD_NODE_CHUNK
+        c0y, c1y = y0 // WILD_NODE_CHUNK, y1 // WILD_NODE_CHUNK
+        out: list[dict] = []
+        for cx in range(c0x, c1x + 1):
+            for cy in range(c0y, c1y + 1):
+                for rx, ry in self._road_chunks.get((cx, cy), ()):
+                    if abs(rx - px) <= R and abs(ry - py) <= R:
+                        out.append({"x": rx, "y": ry})
+        return out
 
     def _nearby_wild_nodes_wire(self, px: int, py: int) -> list[dict]:
         """O(chunks touched) instead of scanning every wild node each tick."""
@@ -2150,11 +2178,7 @@ class GameEngine:
                 self._crop_wire(c) for c in self.crops.values()
                 if abs(c["x"] - px) <= VIEWPORT_RADIUS and abs(c["y"] - py) <= VIEWPORT_RADIUS
             ]
-            nearby_roads = [
-                {"x": rx, "y": ry}
-                for (rx, ry) in self.road_tiles
-                if abs(rx - px) <= VIEWPORT_RADIUS and abs(ry - py) <= VIEWPORT_RADIUS
-            ]
+            nearby_roads = self._nearby_roads_wire(px, py)
             nearby_soil = self._nearby_soil_tiles(px, py)
             nearby_water = self._nearby_water_tiles(px, py)
             nearby_bridges = self._nearby_bridge_tiles(px, py)
@@ -2363,11 +2387,7 @@ class GameEngine:
             for rtype, pile in pile_map.items()
             if abs(tile_key[0]-px) <= VIEWPORT_RADIUS and abs(tile_key[1]-py) <= VIEWPORT_RADIUS
         ]
-        nearby_roads = [
-            {"x": rx, "y": ry}
-            for (rx, ry) in self.road_tiles
-            if abs(rx - px) <= VIEWPORT_RADIUS and abs(ry - py) <= VIEWPORT_RADIUS
-        ]
+        nearby_roads = self._nearby_roads_wire(px, py)
         nearby_soil = self._nearby_soil_tiles(px, py)
         nearby_water = self._nearby_water_tiles(px, py)
         nearby_bridges = self._nearby_bridge_tiles(px, py)
