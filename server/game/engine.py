@@ -1831,6 +1831,7 @@ class GameEngine:
         now = time.monotonic()
         dt = settings.game_tick_ms / 1000.0
         blocked_movement = self._movement_blocked_tiles()
+        logger.info("DBG tick_start sockets=%s", list(self.sockets.keys()))
         for pid in list(self.sockets.keys()):
             pl = self.players.get(pid)
             if not pl:
