@@ -246,7 +246,11 @@ const Renderer = (() => {
 
     const waterGeo = new THREE.PlaneGeometry(T, T);
     waterGeo.rotateX(-Math.PI / 2);
-    // Full-tile unlit quads — no fragment discard (rounded SDF was error-prone and showed green behind).
+    // Per-instance corner radii for IQ sdRoundBox: vec4 = (NE, SE, NW, SW) — see pushW.
+    waterGeo.setAttribute(
+      'aWaterR',
+      new THREE.InstancedBufferAttribute(new Float32Array(MAX_WATER * 4), 4),
+    );
     waterMat = new THREE.MeshBasicMaterial({
       color: 0x4ec8ff,
       fog: false,
@@ -255,6 +259,45 @@ const Renderer = (() => {
     if (THREE.SRGBColorSpace !== undefined) {
       waterMat.colorSpace = THREE.SRGBColorSpace;
     }
+    // Analytical rounded rect in UV space — smooth arcs at pond shores; straight joints between water tiles.
+    waterMat.onBeforeCompile = (shader) => {
+      shader.vertexShader = shader.vertexShader.replace(
+        '#include <common>',
+        `#include <common>
+attribute vec4 aWaterR;
+varying vec4 vWaterR;
+`,
+      );
+      shader.vertexShader = shader.vertexShader.replace(
+        '#include <uv_vertex>',
+        `#include <uv_vertex>
+vWaterR = aWaterR;
+`,
+      );
+      shader.fragmentShader = `
+varying vec4 vWaterR;
+varying vec2 vUv;
+#include <common>
+#include <clipping_planes_pars_fragment>
+#include <logdepthbuf_pars_fragment>
+// https://iquilezles.org/articles/distfunctions2d/ — vec4 = (NE, SE, NW, SW); p in [-1,1]^2, +y toward UV v=1
+float sdRoundBox( vec2 p, vec2 b, vec4 r ) {
+  r.xy = (p.x>0.0)?r.xy : r.zw;
+  r.x  = (p.y>0.0)?r.x  : r.y;
+  vec2 q = abs(p)-b+r.x;
+  return min(max(q.x,q.y),0.0) + length(max(q,0.0)) - r.x;
+}
+void main() {
+  #include <clipping_planes_fragment>
+  vec2 puv = (vUv - 0.5) * 2.0;
+  vec2 p = vec2(puv.x, puv.y);
+  float d = sdRoundBox( p, vec2(1.0), vWaterR );
+  if ( d > 0.0 ) discard;
+  gl_FragColor = vec4( 0.26, 0.68, 0.99, 1.0 );
+  #include <logdepthbuf_fragment>
+}
+`;
+    };
     waterMesh = new THREE.InstancedMesh(waterGeo, waterMat, MAX_WATER);
     waterMesh.receiveShadow = false;
     waterMesh.renderOrder = 2;
@@ -540,6 +583,10 @@ const Renderer = (() => {
   function _waterAndRoadsInView(sx, sy, ex, ey) {
     let wi = 0;
     let ri = 0;
+    const waterSet = new Set((s.water_tiles || []).map((w) => `${w.x},${w.y}`));
+    const hasW = (x, y) => waterSet.has(`${x},${y}`);
+    const waterRAttr = waterMesh.geometry.getAttribute('aWaterR');
+    const waterRArr = waterRAttr.array;
     const pushW = (tx, ty) => {
       if (wi >= MAX_WATER) return;
       const { x, z } = _worldXZ(tx, ty);
@@ -547,7 +594,50 @@ const Renderer = (() => {
       _dummy.rotation.set(0, 0, 0);
       _dummy.scale.set(1, 1, 1);
       _dummy.updateMatrix();
-      waterMesh.setMatrixAt(wi++, _dummy.matrix);
+      waterMesh.setMatrixAt(wi, _dummy.matrix);
+      const wN = hasW(tx, ty - 1);
+      const wE = hasW(tx + 1, ty);
+      const wS = hasW(tx, ty + 1);
+      const wW = hasW(tx - 1, ty);
+      const neD = hasW(tx + 1, ty - 1);
+      const nwD = hasW(tx - 1, ty - 1);
+      const seD = hasW(tx + 1, ty + 1);
+      const swD = hasW(tx - 1, ty + 1);
+      // True quarter-circle arcs at convex *outer* corners only. Cardinal-only rules rounded every
+      // exposed corner, which scalloped straight shorelines (read as stair-steps). Diagonals detect
+      // flat edges: e.g. NE vertex on a horizontal north shore needs r=0 on both adjacent tiles.
+      const Rc = 0.5;
+      const rNE =
+        wN && wE
+          ? 0
+          : (!wN && wE && !neD) || (wN && !wE && !neD)
+            ? 0
+            : Rc;
+      const rSE =
+        wS && wE
+          ? 0
+          : (!wS && wE && !seD) || (wS && !wE && !seD)
+            ? 0
+            : Rc;
+      const rNW =
+        wN && wW
+          ? 0
+          : (!wN && wW && !nwD) || (wN && !wW && !nwD)
+            ? 0
+            : Rc;
+      const rSW =
+        wS && wW
+          ? 0
+          : (!wS && wW && !swD) || (wS && !wW && !swD)
+            ? 0
+            : Rc;
+      const o = wi * 4;
+      // sdRoundBox vec4 = (NE, SE, NW, SW) — pairs (r.xy|r.zw) = east|west halves for IQ selection
+      waterRArr[o] = rNE;
+      waterRArr[o + 1] = rSE;
+      waterRArr[o + 2] = rNW;
+      waterRArr[o + 3] = rSW;
+      wi += 1;
     };
     const pushR = (tx, ty) => {
       if (ri >= MAX_ROAD) return;
@@ -592,6 +682,7 @@ const Renderer = (() => {
     waterMesh.count = wi;
     roadMesh.count = ri;
     waterMesh.instanceMatrix.needsUpdate = true;
+    waterRAttr.needsUpdate = true;
     roadMesh.instanceMatrix.needsUpdate = true;
   }
 

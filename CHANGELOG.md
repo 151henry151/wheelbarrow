@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.10] - 2026-04-17
+
+### Changed
+- **Client** (`client/js/renderer.js`): **Water** — compute **per-corner** **`sdRoundBox`** radii with **diagonal** neighbor checks so **straight** **shorelines** stay **straight** (no per-tile scallops); apply **full** **outer** **convex** **quarter-circles** (**radius** **0.5** in UV space) only at **true** **90°** **outer** **corners** of the water mask
+
+## [0.12.9] - 2026-04-17
+
+### Changed
+- **Client** (`client/js/renderer.js`): **Water** — restore **Inigo Quilez `sdRoundBox`** rounded masks per tile with **`vec4` (NE, SE, NW, SW)**; **`p = (vUv-0.5)*2`** in UV space; **hardcoded** blue **after** `discard` (**no** `linearToOutputTexel`) so ponds/rivers use **smooth curved** outer edges instead of stair-stepped square union
+
 ## [0.12.8] - 2026-04-17
 
 ### Changed
