@@ -190,7 +190,6 @@ class GameEngine:
         # Load towns + clustered NPC districts (backfill if missing)
         for t in await queries.load_all_towns():
             self.towns[t["id"]] = dict(t)
-        npc_district_rebuilt: set[int] = set()
         for tid, town in list(self.towns.items()):
             parsed = parse_npc_district(town.get("npc_district"))
             if parsed and district_spread_ok(parsed):
@@ -201,7 +200,6 @@ class GameEngine:
             d = place_npc_district(town, rng)
             town["npc_district"] = d
             await queries.update_town_npc_district(tid, d)
-            npc_district_rebuilt.add(tid)
 
         # Load parcels and build spatial index
         for p in await queries.load_all_parcels():
@@ -257,12 +255,9 @@ class GameEngine:
         road_rows = await queries.load_all_roads_with_protected()
         self.road_tiles = {(r[0], r[1]) for r in road_rows}
         self.protected_road_tiles = {(r[0], r[1]) for r in road_rows if r[2]}
-        if not self.road_tiles:
-            await self._seed_initial_npc_roads()
-        for tid in npc_district_rebuilt:
-            t = self.towns.get(tid)
-            if t:
-                await self._merge_npc_roads_for_town(t)
+        # Intra-town NPC paths must run even when inter-town roads already filled the table;
+        # the old `if not self.road_tiles` branch skipped them entirely on most live worlds.
+        await self._ensure_intratown_npc_road_paths()
 
         await queries.ensure_market_price_rows(MARKET_BASE_PRICES)
         self.prices = await queries.get_market_prices()
@@ -307,9 +302,12 @@ class GameEngine:
         }
         return node
 
-    async def _seed_initial_npc_roads(self):
-        """First boot: dirt paths inside each town polygon linking NPC district sites."""
-        new_tiles: set[tuple[int, int]] = set()
+    async def _ensure_intratown_npc_road_paths(self) -> None:
+        """
+        Dirt paths inside each town polygon connecting all NPC district sites (market, shops).
+        Idempotent: only INSERTs tiles not already present (inter-town protected roads stay as-is).
+        """
+        desired: set[tuple[int, int]] = set()
         for town in self.towns.values():
             poly = town.get("boundary") or []
             d = town.get("npc_district") or {}
@@ -320,30 +318,13 @@ class GameEngine:
                 v = d.get(k)
                 if v and len(v) >= 2:
                     sites.append((int(v[0]), int(v[1])))
-            if len(sites) >= 2:
-                new_tiles |= path_union_for_sites(poly, sites, set())
-        self.road_tiles |= new_tiles
-        if new_tiles:
-            await queries.insert_road_bulk(list(new_tiles))
-
-    async def _merge_npc_roads_for_town(self, town: dict):
-        """After npc_district moves, extend dirt paths to the new shop sites (INSERT IGNORE duplicates)."""
-        poly = town.get("boundary") or []
-        d = town.get("npc_district") or {}
-        if len(poly) < 3:
-            return
-        sites: list[tuple[int, int]] = []
-        for k in DISTRICT_KEYS:
-            v = d.get(k)
-            if v and len(v) >= 2:
-                sites.append((int(v[0]), int(v[1])))
-        if len(sites) < 2:
-            return
-        new_tiles = path_union_for_sites(poly, sites, set())
-        extra = new_tiles - self.road_tiles
-        self.road_tiles |= new_tiles
+            if len(sites) < 2:
+                continue
+            desired |= path_union_for_sites(poly, sites, set())
+        extra = desired - self.road_tiles
+        self.road_tiles |= extra
         if extra:
-            await queries.insert_road_bulk(list(extra))
+            await queries.insert_road_bulk(list(extra), protected=0)
 
     def _structure_footprint_tiles(self) -> set[tuple[int, int]]:
         return {(int(n["x"]), int(n["y"])) for n in self.structures.values()}

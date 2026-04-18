@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.36] - 2026-04-18
+
+### Fixed
+- **Server** (`server/game/engine.py`): **Run** **intra-town** **NPC** **road** **seeding** **whenever** **the** **world** **loads** **(not** **only** **when** **`world_roads`** **was** **empty);** **inter-town** **roads** **had** **prevented** **shop** **paths** **from** **ever** **being** **inserted** **on** **most** **live** **databases**
+- **Server** (`server/game/roads_util.py`): **Connect** **NPC** **district** **sites** **with** **a** **Prim-style** **shortest-path** **network** **inside** **the** **town** **polygon** **instead** **of** **a** **single** **ring** **order** **that** **could** **omit** **segments**
+
+### Changed
+- **Server** (`server/game/engine.py`): **Replace** **`_seed_initial_npc_roads`** **/** **`_merge_npc_roads_for_town`** **with** **`_ensure_intratown_npc_road_paths`** **(covers** **re-placed** **districts** **and** **existing** **worlds)**
+
+### Notes
+- **Seasonal** **road** **growth** **toward** **player** **buildings** **(`_grow_roads_new_year`**, **spring** **transition)** **is** **unchanged** **—** **see** **`ROAD_GROWTH_TILES_MIN`** **/** **`MAX`** **in** **`server/game/constants.py`**
+
 ## [0.12.35] - 2026-04-18
 
 ### Fixed

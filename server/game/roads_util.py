@@ -49,8 +49,15 @@ def path_union_for_sites(
     sites: Iterable[tuple[int, int]],
     extra_blocked: set[tuple[int, int]],
 ) -> set[tuple[int, int]]:
-    """Chain consecutive sites with BFS paths inside polygon; union all path tiles."""
-    sites_l = list(sites)
+    """
+    Connect all NPC district sites with BFS paths inside the town polygon (4-neighbour).
+
+    Uses a Prim-style build: repeatedly connect one not-yet-linked site to the growing
+    component using the shortest available BFS path. A fixed ring (market→…→repair→market)
+    often missed edges when a segment failed or was long; this keeps every reachable site
+    on one dirt network.
+    """
+    sites_l = list(dict.fromkeys(sites))
     if len(sites_l) < 2:
         return set(sites_l)
 
@@ -59,16 +66,27 @@ def path_union_for_sites(
             return False
         return _point_in_polygon(tx + 0.5, ty + 0.5, poly)
 
-    roads: set[tuple[int, int]] = set()
-    # Always mark each business tile as road so shops sit on dirt even if path skirts the tile
-    roads.update(sites_l)
-    for i in range(len(sites_l) - 1):
-        p = bfs_path_4(sites_l[i], sites_l[i + 1], passable)
-        if p:
-            roads.update(p)
-    p = bfs_path_4(sites_l[-1], sites_l[0], passable)
-    if p:
-        roads.update(p)
+    roads: set[tuple[int, int]] = set(sites_l)
+    connected = {sites_l[0]}
+    unconnected = set(sites_l[1:])
+
+    while unconnected:
+        best_path: list[tuple[int, int]] | None = None
+        best_g: tuple[int, int] | None = None
+        best_len = 10**9
+        for g in unconnected:
+            for c in connected:
+                p = bfs_path_4(c, g, passable)
+                if p and len(p) < best_len:
+                    best_len = len(p)
+                    best_path = p
+                    best_g = g
+        if best_path is None or best_g is None:
+            break
+        roads.update(best_path)
+        connected.add(best_g)
+        unconnected.remove(best_g)
+
     return roads
 
 
