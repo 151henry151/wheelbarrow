@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.19] - 2026-04-18
+
+### Changed
+- **Client** (`client/js/renderer.js`): **Replace** **primitive** **wheelbarrow** **(box** **tub** **+** **flat** **torus)** **with** **a** **classic** **single-wheel** **layout** **—** **upright** **cylinder** **tire** **on** **a** **horizontal** **axle** **at** **the** **front** **(+Z),** **steel** **tray** **with** **flared** **rim** **and** **forward** **lip** **over** **the** **wheel,** **two** **wooden** **side** **rails** **from** **the** **axle** **zone** **to** **cylindrical** **handles** **at** **the** **rear,** **metal** **straps,** **cross** **braces,** **rear** **legs** **with** **foot** **pads,** **and** **diagonal** **stiffeners**
+
 ## [0.12.18] - 2026-04-18
 
 ### Changed
