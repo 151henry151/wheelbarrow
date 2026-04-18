@@ -614,10 +614,10 @@ ${sdRoundBoxFn}`,
       const nwD = hasW(tx - 1, ty - 1);
       const seD = hasW(tx + 1, ty + 1);
       const swD = hasW(tx - 1, ty + 1);
-      // True quarter-circle arcs at convex *outer* corners only. Cardinal-only rules rounded every
-      // exposed corner, which scalloped straight shorelines (read as stair-steps). Diagonals detect
-      // flat edges: e.g. NE vertex on a horizontal north shore needs r=0 on both adjacent tiles.
-      const Rc = 0.5;
+      // Max corner radius in IQ sdRoundBox (shader uses half-extents b=vec2(1) in p-space). Rc=1
+      // with all four corners active yields a circle for an isolated tile; outer convex pond corners
+      // use full quarter-arcs. Diagonals zero r along straight shores / interior cardinals.
+      const Rc = 1.0;
       const rNE =
         wN && wE
           ? 0

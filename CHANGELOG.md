@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.14] - 2026-04-17
+
+### Changed
+- **Client** (`client/js/renderer.js`): **Water** — set **outer** **corner** **radius** **`Rc`** **to** **`1.0`** **in** **normalized** **`sdRoundBox`** **space** **(matches** **shader** **`b`** **=** **`vec2(1.0)`**)** so **a** **lone** **water** **tile** **is** **a** **full** **circle** **and** **convex** **shore** **corners** **use** **maximum** **quarter-circle** **arcs**
+
 ## [0.12.13] - 2026-04-17
 
 ### Changed
