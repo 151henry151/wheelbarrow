@@ -44,10 +44,10 @@ const Renderer = (() => {
   let horizonGrass;
   let grassMesh;
   let grassMat;
-  /** Zoomed-out + low pitch can cover 50k+ tile rects; cap iteration and center on view. */
-  const MAX_GRASS = 65536;
+  /** Instanced grass cap — keep iteration (~π r²) cheap per frame. */
+  const MAX_GRASS = 10000;
   /** Radial fade band at grass edge (world units ≈ tiles × T). */
-  const GRASS_FADE_TILES = 22;
+  const GRASS_FADE_TILES = 14;
   const HORIZON_PLANE_SIZE = 340000;
   let waterMesh;
   let waterMat;
@@ -552,7 +552,7 @@ ${sdRoundBoxFn}`,
       minZ = Math.min(minZ, _planeHit.z);
       maxZ = Math.max(maxZ, _planeHit.z);
     }
-    const margin = T * 2;
+    const margin = T * 1.5;
     minX -= margin;
     maxX += margin;
     minZ -= margin;
@@ -570,12 +570,13 @@ ${sdRoundBoxFn}`,
    * Union with a player-centered footprint so roads/water/soil don’t vanish when orbiting the camera.
    */
   function _expandTileRangeForGroundLayers(sx, sy, ex, ey, wx, wy, px, py) {
-    const span = 52 + Math.min(96, Math.floor(_camDist / T));
+    // Tighter than before: large span + pad was loading far beyond the frustum and costing CPU.
+    const span = 26 + Math.min(42, Math.floor(_camDist / T));
     const u0 = Math.max(0, Math.floor(px) - span);
     const v0 = Math.max(0, Math.floor(py) - span);
     const u1 = Math.min(wx - 1, Math.ceil(px) + span);
     const v1 = Math.min(wy - 1, Math.ceil(py) + span);
-    const pad = 14;
+    const pad = 8;
     let sx2 = Math.min(sx, u0) - pad;
     let sy2 = Math.min(sy, v0) - pad;
     let ex2 = Math.max(ex, u1) + pad;
@@ -1467,7 +1468,7 @@ ${sdRoundBoxFn}`,
     return wbPool[i];
   }
 
-  function _players(sx, sy, ex, ey) {
+  function _players(sx, sy, ex, ey, smoothX, smoothY) {
     wbPoolUsed = 0;
     for (const p of s.players || []) {
       if (!p || p.id == null || !s.player || p.id === s.player.id) continue;
@@ -1485,13 +1486,15 @@ ${sdRoundBoxFn}`,
       grp.visible = true;
     }
     if (s.player) {
+      const plx = smoothX != null ? smoothX : s.player.x;
+      const ply = smoothY != null ? smoothY : s.player.y;
       const bucket = s.player.bucket || {};
       const total = Object.values(bucket).reduce((a, b) => a + b, 0);
       const cap = s.player.bucket_cap_effective != null ? s.player.bucket_cap_effective : (s.player.bucket_cap || 10);
       const face = s.facing || 'down';
       const grp = _ensureWb(wbPoolUsed++);
-      const { x, z } = _worldXZ(s.player.x, s.player.y);
-      const gy = _groundY(s.player.x, s.player.y);
+      const { x, z } = _worldXZ(plx, ply);
+      const gy = _groundY(plx, ply);
       grp.userData.gy = gy;
       grp.position.set(x, gy, z);
       grp.userData.wx = x;
@@ -1526,13 +1529,27 @@ ${sdRoundBoxFn}`,
     _vpH = H;
     const px = s.player.x;
     const py = s.player.y;
-    _camX = px * T - W / 2 + T / 2;
-    _camY = py * T - H / 2 + T / 2;
+    if (!Number.isFinite(s._renderSmoothX)) {
+      s._renderSmoothX = px;
+      s._renderSmoothY = py;
+    }
+    if (Math.hypot(px - s._renderSmoothX, py - s._renderSmoothY) > 10) {
+      s._renderSmoothX = px;
+      s._renderSmoothY = py;
+    } else {
+      const sk = 0.38;
+      s._renderSmoothX += (px - s._renderSmoothX) * sk;
+      s._renderSmoothY += (py - s._renderSmoothY) * sk;
+    }
+    const rx = s._renderSmoothX;
+    const ry = s._renderSmoothY;
+    _camX = rx * T - W / 2 + T / 2;
+    _camY = ry * T - H / 2 + T / 2;
 
     try {
     _applySeasonAtmosphere();
-    const sunX = px * T + T / 2;
-    const sunZ = py * T + T / 2;
+    const sunX = rx * T + T / 2;
+    const sunZ = ry * T + T / 2;
     sun.position.set(sunX + 320, 1250, sunZ + 220);
 
     while (dynamicRoot.children.length) {
@@ -1557,36 +1574,36 @@ ${sdRoundBoxFn}`,
     const wx = s.world ? s.world.w : 1000;
     const wy = s.world ? s.world.h : 1000;
 
-    _updateCamera(px, py);
+    _updateCamera(rx, ry);
     let sx;
     let sy;
     let ex;
     let ey;
-    const vr = _visibleTileRange(wx, wy, px, py);
+    const vr = _visibleTileRange(wx, wy, rx, ry);
     if (vr) {
       sx = vr.sx;
       sy = vr.sy;
       ex = vr.ex;
       ey = vr.ey;
     } else {
-      const span = Math.ceil(Math.max(W, H) / T) + 12;
-      sx = Math.max(0, Math.floor(px - span));
-      sy = Math.max(0, Math.floor(py - span));
-      ex = Math.min(wx - 1, Math.ceil(px + span));
-      ey = Math.min(wy - 1, Math.ceil(py + span));
+      const span = Math.min(52, Math.ceil(Math.max(W, H) / T) + 8);
+      sx = Math.max(0, Math.floor(rx - span));
+      sy = Math.max(0, Math.floor(ry - span));
+      ex = Math.min(wx - 1, Math.ceil(rx + span));
+      ey = Math.min(wy - 1, Math.ceil(ry + span));
     }
-    const tr = _expandTileRangeForGroundLayers(sx, sy, ex, ey, wx, wy, px, py);
+    const tr = _expandTileRangeForGroundLayers(sx, sy, ex, ey, wx, wy, rx, ry);
     sx = tr.sx;
     sy = tr.sy;
     ex = tr.ex;
     ey = tr.ey;
 
-    const gwy = _groundY(px, py);
-    horizonGrass.position.set(px * T + T / 2, gwy - 0.35, py * T + T / 2);
-    const hzRgb = _fieldGrassRgb(Math.floor(px), Math.floor(py));
+    const gwy = _groundY(rx, ry);
+    horizonGrass.position.set(rx * T + T / 2, gwy - 0.35, ry * T + T / 2);
+    const hzRgb = _fieldGrassRgb(Math.floor(rx), Math.floor(ry));
     horizonGrass.material.color.setRGB(hzRgb.r, hzRgb.g, hzRgb.b);
 
-    _setGrassTiles(px, py, wx, wy, hzRgb.r, hzRgb.g, hzRgb.b);
+    _setGrassTiles(rx, ry, wx, wy, hzRgb.r, hzRgb.g, hzRgb.b);
     _waterAndRoadsInView(sx, sy, ex, ey);
     _soilFurrows(sx, sy, ex, ey);
     _bridges(sx, sy, ex, ey);
@@ -1596,7 +1613,7 @@ ${sdRoundBoxFn}`,
     _npcMarkers(sx, sy, ex, ey);
     _piles(sx, sy, ex, ey);
     _crops(sx, sy, ex, ey);
-    _players(sx, sy, ex, ey);
+    _players(sx, sy, ex, ey, rx, ry);
 
     renderer.render(scene, camera);
     } catch (err) {

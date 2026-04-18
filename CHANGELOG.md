@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.26] - 2026-04-18
+
+### Changed
+- **Client** (`client/js/renderer.js`): **Reduce** **loaded** **tile** **footprint** **—** **tighter** **`_expandTileRangeForGroundLayers`** **span/pad,** **smaller** **frustum** **margin,** **capped** **fallback** **span,** **`MAX_GRASS`** **65536→10000** **with** **matching** **fade** **band**
+- **Client** (`client/js/renderer.js`): **Lerp** **`_renderSmoothX/Y`** **toward** **server** **position** **each** **frame** **for** **camera,** **grass,** **and** **local** **wheelbarrow** **mesh** **(snap** **if** **teleport** **>10** **tiles)** **to** **ease** **stop-go** **between** **ticks**
+- **Server** (`server/game/constants.py`): **Lower** **`VIEWPORT_RADIUS`** **120→72** **so** **tick** **payloads** **cover** **less** **world** **around** **the** **player**
+
 ## [0.12.25] - 2026-04-18
 
 ### Changed

@@ -252,8 +252,8 @@ TOWN_PARCELS_PER_TOWN = (8, 20)    # random range
 WILDERNESS_PARCELS    = 200        # parcels outside any town
 
 # ---- World viewport -------------------------
-# Nodes/piles/crops sent per tick only within this radius of the player
-VIEWPORT_RADIUS = 120
+# Nodes/piles/crops sent per tick only within this radius of the player (tile units)
+VIEWPORT_RADIUS = 72
 
 # Wild resource grid: extra scatter pass targets these (~2.5× vs single-pass baseline)
 MINERAL_NODE_TYPES = frozenset({"stone", "gravel", "clay", "dirt"})
