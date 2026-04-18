@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.47] - 2026-04-18
+
+### Fixed
+- **Server** (`server/main.py`): **Pump** **inbound** **WebSocket** **JSON** **into** **`asyncio.Queue`** **so** **`receive_json`** **is** **never** **cancelled** **by** **`asyncio.wait`** **—** **avoids** **stranding** **`move`** **payloads** **while** **still** **multiplexing** **with** **`out_q`**
+- **Client** (`client/js/input.js`): **Duplicate-send** **the** **first** **`move`** **after** **rest** **via** **`queueMicrotask`** **and** **tighten** **`MOVE_RESEND_MS`** **to** **33** **—** **reduces** **chance** **`_input_fwd`** **stays** **zero** **when** **the** **HUD** **already** **shows** **camera-snapped** **rotation** **(optimistic** **`face_angle`** **in** **`game.js`**)**
+
 ## [0.12.46] - 2026-04-18
 
 ### Fixed

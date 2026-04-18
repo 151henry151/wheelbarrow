@@ -71,18 +71,46 @@ async def websocket_endpoint(websocket: WebSocket, token: str):
             pass
         return
 
-    # Game loop enqueues JSON via put_nowait; we send from this same task so send/receive obey
-    # ASGI websocket expectations. Multiplex with asyncio.wait so we never block only on receive
-    # while ticks pile up (separate outbound task can deadlock with receive on some servers).
+    # Game loop enqueues JSON via put_nowait; we send from this same task.
+    # Inbound messages are pumped into in_q so we never cancel receive_json() mid-flight:
+    # cancelling the old asyncio.wait "loser" could strand a decoded move before it was read.
     out_q: asyncio.Queue = asyncio.Queue()
+    in_q: asyncio.Queue = asyncio.Queue()
+
+    async def pump_incoming():
+        try:
+            while True:
+                msg = await websocket.receive_json()
+                await in_q.put(msg)
+        except WebSocketDisconnect:
+            pass
+        except Exception:
+            logging.exception("wheelbarrow: websocket receive failed")
+        finally:
+            try:
+                await in_q.put(None)
+            except Exception:
+                pass
+
+    pump_task = asyncio.create_task(pump_incoming())
+
+    async def handle_input_safe(msg: dict) -> None:
+        try:
+            await engine.handle_input(player["id"], msg)
+        except Exception:
+            logging.exception("handle_input failed")
+            try:
+                await websocket.send_json({
+                    "type": "notice",
+                    "msg": "Server hit an error on that action — try again or refresh the page.",
+                })
+            except Exception:
+                pass
 
     engine.add_socket(player["id"], websocket, out_q)
 
     try:
         while True:
-            # If receive_json and out_q.get() both complete in the same turn, FIRST_COMPLETED
-            # can pick receive every time while ticks stay queued — client move spam then starves
-            # tick delivery. Flush any queued server→client payloads before waiting on input.
             while True:
                 try:
                     queued = out_q.get_nowait()
@@ -90,8 +118,18 @@ async def websocket_endpoint(websocket: WebSocket, token: str):
                     break
                 await websocket.send_json(queued)
 
+            while True:
+                try:
+                    msg = in_q.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
+                if msg is None:
+                    return
+                await handle_input_safe(msg)
+                await asyncio.sleep(0)
+
             out_task = asyncio.create_task(out_q.get())
-            in_task = asyncio.create_task(websocket.receive_json())
+            in_task = asyncio.create_task(in_q.get())
             _, pending = await asyncio.wait(
                 {out_task, in_task},
                 return_when=asyncio.FIRST_COMPLETED,
@@ -121,56 +159,26 @@ async def websocket_endpoint(websocket: WebSocket, token: str):
                     except asyncio.QueueEmpty:
                         break
                     await websocket.send_json(p2)
-                # If both out_task and in_task completed in the same loop turn, only one
-                # "wins" asyncio.wait; process the inbound move so it is not dropped.
-                if in_task.done():
-                    _disconnect = False
-                    try:
-                        msg2 = in_task.result()
-                    except asyncio.CancelledError:
-                        pass
-                    except WebSocketDisconnect:
-                        _disconnect = True
-                    except Exception:
-                        pass
-                    else:
-                        try:
-                            await engine.handle_input(player["id"], msg2)
-                        except Exception:
-                            logging.exception("handle_input failed")
-                            try:
-                                await websocket.send_json({
-                                    "type": "notice",
-                                    "msg": "Server hit an error on that action — try again or refresh the page.",
-                                })
-                            except Exception:
-                                pass
-                        await asyncio.sleep(0)
-                    if _disconnect:
-                        break
                 continue
 
             try:
                 msg = in_task.result()
             except asyncio.CancelledError:
                 continue
-            except WebSocketDisconnect:
+            if msg is None:
                 break
-            try:
-                await engine.handle_input(player["id"], msg)
-            except Exception:
-                logging.exception("handle_input failed")
-                try:
-                    await websocket.send_json({
-                        "type": "notice",
-                        "msg": "Server hit an error on that action — try again or refresh the page.",
-                    })
-                except Exception:
-                    pass
+            await handle_input_safe(msg)
             await asyncio.sleep(0)
     except WebSocketDisconnect:
         pass
     finally:
+        pump_task.cancel()
+        try:
+            await pump_task
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            pass
         await engine.remove_player(player["id"])
 
 

@@ -13,7 +13,7 @@ const Input = (() => {
   let lastSentMoveSig = JSON.stringify({ fwd: 0, turn: 0 });
   let lastMoveSendTime = 0;
   /** While keys are held, re-send so a single dropped WebSocket message cannot zero input forever. */
-  const MOVE_RESEND_MS = 50;
+  const MOVE_RESEND_MS = 33;
 
   const held = {};
 
@@ -96,9 +96,10 @@ const Input = (() => {
 
     const msg = { type: 'move', fwd, turn };
     // From a full stop, align barrow to orbit camera before driving (not tank-facing).
+    const wasAtRest = lastFwdSample === 0;
     if (
       fwd !== 0
-      && lastFwdSample === 0
+      && wasAtRest
       && turn === 0
       && typeof Renderer !== 'undefined'
       && typeof Renderer.getCameraFacingAngle === 'function'
@@ -115,6 +116,14 @@ const Input = (() => {
     lastSentMoveSig = sig;
     lastMoveSendTime = now;
     sendFn(msg);
+    // Starting drive from rest: duplicate-send so a lone lost packet cannot leave _input_fwd at 0
+    // while the optimistic client angle (game.js) still rotates the barrow.
+    if (wasAtRest && fwd !== 0) {
+      const dup = { ...msg };
+      queueMicrotask(() => {
+        if (sendFn) sendFn(dup);
+      });
+    }
   }
 
   function setAutopilotBlocked(v) {
