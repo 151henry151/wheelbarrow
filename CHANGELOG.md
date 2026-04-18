@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.18] - 2026-04-18
+
+### Changed
+- **Client** (`client/js/renderer.js`): **Water** — **replace** **inner** **L-corner** **`smin`** **union** **(convex** **caps** **into** **grass)** **with** **`smax`** **subtraction** **so** **the** **shore** **is** **a** **concave** **arc**; **place** **disk** **centers** **on** **each** **corner** **bisector** **at** **`B+Rf/√2`** **with** **`B=1.028`**
+
 ## [0.12.17] - 2026-04-17
 
 ### Changed

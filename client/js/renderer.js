@@ -253,7 +253,7 @@ const Renderer = (() => {
       'aWaterR',
       new THREE.InstancedBufferAttribute(new Float32Array(MAX_WATER * 4), 4),
     );
-    // Inner L-vertex fillets: vec4 (NE,SE,NW,SW) — union quarter-disks past the tile corner in p-space.
+    // Inner L-vertex fillets: vec4 (NE,SE,NW,SW) — shader subtracts a disk cap (concave arc), not union into grass.
     waterGeo.setAttribute(
       'aInnerFillet',
       new THREE.InstancedBufferAttribute(new Float32Array(MAX_WATER * 4), 4),
@@ -299,10 +299,10 @@ float sdRoundBox( vec2 p, vec2 b, vec4 r ) {
   vec2 q = abs(p)-b+r.x;
   return min(max(q.x,q.y),0.0) + length(max(q,0.0)) - r.x;
 }
-// Smooth union — avoids slivers where inner fillet disks meet the main rounded-rect SDF.
-float smin( float a, float b, float k ) {
-  float h = clamp( 0.5 + 0.5 * ( b - a ) / k, 0.0, 1.0 );
-  return mix( b, a, h ) - k * h * ( 1.0 - h );
+// Smooth max — concave inner corners subtract a disk cap; smax avoids a crease vs sdRoundBox.
+float smax( float a, float b, float k ) {
+  float h = clamp( 0.5 + 0.5 * ( a - b ) / k, 0.0, 1.0 );
+  return mix( b, a, h ) + k * h * ( 1.0 - h );
 }
 `;
       shader.fragmentShader = shader.fragmentShader.replace(
@@ -319,27 +319,30 @@ ${sdRoundBoxFn}`,
         `#include <clipping_planes_fragment>
 	float wsm = 0.045;
 	float wqs = ${wqs};
+	// Must match sdRoundBox half-extents vec2(1.028) — centers for inner (concave) fillet disks sit in grass past each corner.
+	float B = 1.028;
 	float Rf = 1.0;
+	// Offset along diagonal from each tile corner into grass so |corner - O| = Rf (tangent fillet); full (B+Rf,B+Rf) misses the corner.
+	float od = Rf * 0.70710678;
 	vec2 puvW = (vWaterUv - 0.5) * 2.0 * wqs;
-	float dw = sdRoundBox( puvW, vec2( 1.028 ), vWaterR );
-	// Inner L-corners: disks centered at (±(1+Rf),±(1+Rf)) — tangent to p.x=±1 and p.y=±1; bleed into grass.
-	// Do NOT mask to p.x>1 && p.y>1 — that skipped the tangent strips and caused sharp slivers.
+	float dw = sdRoundBox( puvW, vec2( B ), vWaterR );
+	// Inner L-corners: subtract water with smax(dw, Rf - |p-O|); O is in grass on the angle bisector from each corner.
 	float sfk = 0.09;
 	if ( vInnerFillet.x > 0.5 ) {
-		float df = length( puvW - vec2( 1.0 + Rf, 1.0 + Rf ) ) - Rf;
-		dw = smin( dw, df, sfk );
+		float dcut = Rf - length( puvW - vec2( B + od, B + od ) );
+		dw = smax( dw, dcut, sfk );
 	}
 	if ( vInnerFillet.y > 0.5 ) {
-		float df = length( puvW - vec2( 1.0 + Rf, -1.0 - Rf ) ) - Rf;
-		dw = smin( dw, df, sfk );
+		float dcut = Rf - length( puvW - vec2( B + od, -B - od ) );
+		dw = smax( dw, dcut, sfk );
 	}
 	if ( vInnerFillet.z > 0.5 ) {
-		float df = length( puvW - vec2( -1.0 - Rf, 1.0 + Rf ) ) - Rf;
-		dw = smin( dw, df, sfk );
+		float dcut = Rf - length( puvW - vec2( -B - od, B + od ) );
+		dw = smax( dw, dcut, sfk );
 	}
 	if ( vInnerFillet.w > 0.5 ) {
-		float df = length( puvW - vec2( -1.0 - Rf, -1.0 - Rf ) ) - Rf;
-		dw = smin( dw, df, sfk );
+		float dcut = Rf - length( puvW - vec2( -B - od, -B - od ) );
+		dw = smax( dw, dcut, sfk );
 	}
 	if ( dw > wsm ) discard;
 `,
@@ -655,8 +658,8 @@ ${sdRoundBoxFn}`,
       // Max corner radius in IQ sdRoundBox (shader uses half-extents b=vec2(1) in p-space). Rc=1
       // with all four corners active yields a circle for an isolated tile; outer convex pond corners
       // use full quarter-arcs. Diagonals zero r along straight shores / interior cardinals.
-      // Concave inner vertices (3 water + 1 grass): r=0 on sdRoundBox + shader unions quarter-disk
-      // past (±1,±1) so water bleeds onto grass with radius Rf = Rc. Extra cardinal/diagonal rules
+      // Concave inner vertices (grass on diagonal): r=0 on sdRoundBox + shader subtracts a quarter-arc
+      // (disk center on bisector into grass). Extra cardinal/diagonal rules
       // avoid V-notches along straight shores.
       const Rc = 1.0;
       const rNE =
