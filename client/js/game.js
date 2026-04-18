@@ -1,3 +1,5 @@
+const GAME_VERSION = 'v0.12.45';
+
 // Mirrored from server/game/constants.py
 const WB_BARROW_MATERIAL_NAMES = { 1: 'plastic', 2: 'steel',    3: 'aluminium' };
 const WB_TIRE_TYPE_NAMES        = { 1: 'regular', 2: 'tubeless', 3: 'heavy-duty' };
@@ -421,6 +423,8 @@ function _checkTownCrossing() {
 function updateHud() {
   if (!state.player) return;
   if (!state.hudVisible) return;
+
+  document.getElementById('hud-version').textContent = GAME_VERSION;
 
   if (state.season) {
     const mins = Math.ceil(state.season.remaining_s / 60);

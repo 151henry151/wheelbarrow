@@ -61,6 +61,8 @@ from server.game.construction import (
 from server.db import queries
 from server.config import settings
 
+logger = logging.getLogger("uvicorn.error")
+
 
 def _bucket_total(bucket: dict) -> float:
     return sum(bucket.values())
@@ -590,6 +592,8 @@ class GameEngine:
             if pl:
                 pl["_input_fwd"] = float(msg.get("fwd", 0) or 0)
                 pl["_input_turn"] = float(msg.get("turn", 0) or 0)
+                if pl["_input_fwd"] != 0 or pl["_input_turn"] != 0:
+                    logger.info("DBG handle_input MOVE pid=%s fwd=%.2f turn=%.2f", player_id, pl["_input_fwd"], pl["_input_turn"])
                 pl["_input_fwd"] = max(-1.0, min(1.0, pl["_input_fwd"]))
                 pl["_input_turn"] = max(-1.0, min(1.0, pl["_input_turn"]))
                 # Client sends when starting fwd/back from rest: face orbit camera, then drive.
@@ -1832,6 +1836,8 @@ class GameEngine:
             if not pl:
                 continue
             try:
+                if pl.get("_input_fwd", 0) != 0 or pl.get("_input_turn", 0) != 0:
+                    logger.info("DBG tick pid=%s fwd=%.2f turn=%.2f pos=(%.2f,%.2f)", pid, pl.get("_input_fwd", 0), pl.get("_input_turn", 0), float(pl.get("x", 0)), float(pl.get("y", 0)))
                 ev = integrate_player_movement(
                     pl, dt, self.water_tiles, self.bridge_tiles, blocked_movement, self.road_tiles,
                 )

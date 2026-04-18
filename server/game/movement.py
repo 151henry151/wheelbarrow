@@ -4,7 +4,10 @@ Angle 0 = east (+x), π/2 = south (+y); velocity (cos θ, sin θ).
 """
 from __future__ import annotations
 
+import logging
 import math
+
+logger = logging.getLogger("uvicorn.error")
 
 from server.game.constants import (
     RESOURCE_WEIGHTS,
@@ -218,18 +221,24 @@ def integrate_player_movement(
     nx = max(0.0, min(float(WORLD_W) - 1e-7, nx))
     ny = max(0.0, min(float(WORLD_H) - 1e-7, ny))
 
+    pid = player.get("id", "?")
     if _segment_hits_water(ox, oy, nx, ny, water_tiles, bridge_tiles):
+        logger.warning("DBG move blocked WATER pid=%s pos=(%.2f,%.2f) angle=%.3f fwd=%.2f", pid, ox, oy, angle, fwd)
         return events
     if _segment_hits_blocked(ox, oy, nx, ny, blocked_tiles):
+        logger.warning("DBG move blocked SEGMENT pid=%s pos=(%.2f,%.2f) angle=%.3f fwd=%.2f", pid, ox, oy, angle, fwd)
         return events
 
     tx, ty = int(math.floor(nx)), int(math.floor(ny))
     sx, sy = int(math.floor(ox)), int(math.floor(oy))
     if not _walkable_tile(tx, ty, water_tiles, bridge_tiles):
+        logger.warning("DBG move blocked DEST_WATER pid=%s pos=(%.2f,%.2f) dest=(%d,%d)", pid, ox, oy, tx, ty)
         return events
     # Reject entering a blocked tile from another tile; allow leaving or nudging within same tile.
     if (tx, ty) in blocked_tiles and (tx, ty) != (sx, sy):
+        logger.warning("DBG move blocked DEST_BLOCKED pid=%s pos=(%.2f,%.2f) dest=(%d,%d)", pid, ox, oy, tx, ty)
         return events
+    logger.info("DBG move OK pid=%s (%.2f,%.2f)->(%.2f,%.2f) fwd=%.2f", pid, ox, oy, nx, ny, fwd)
 
     player["x"], player["y"] = nx, ny
 
