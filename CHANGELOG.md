@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.24] - 2026-04-18
+
+### Changed
+- **Client** (`client/js/renderer.js`): **Do** **not** **draw** **the** **local** **player’s** **username** **sprite** **above** **their** **wheelbarrow** **—** **other** **players’** **names** **unchanged**
+
 ## [0.12.23] - 2026-04-18
 
 ### Changed

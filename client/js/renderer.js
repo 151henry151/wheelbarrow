@@ -1497,7 +1497,6 @@ ${sdRoundBoxFn}`,
       const orient = s.player.angle != null && Number.isFinite(s.player.angle) ? s.player.angle : face;
       _wheelbarrow3d(grp, '#f5c842', s.player.flat_tire, Math.min(1, total / cap), orient, null);
       grp.visible = true;
-      if (s.player.username) _spriteText(s.player.username, x, gy + 38, z, 0xf5c842, true);
     }
     for (let i = wbPoolUsed; i < wbPool.length; i++) wbPool[i].visible = false;
   }
