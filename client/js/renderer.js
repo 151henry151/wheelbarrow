@@ -351,8 +351,8 @@ ${sdRoundBoxFn}`,
     waterMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     groundGroup.add(waterMesh);
 
-    // Slightly larger than T so neighbors overlap (inset T−ε left thin gaps showing grass/grid lines).
-    const roadGeo = new THREE.BoxGeometry(T + ROAD_TILE_OVERLAP, 1.8, T + ROAD_TILE_OVERLAP);
+    // Flat dirt ribbon (XZ plane) — reads as a path, not a tall block on every tile.
+    const roadGeo = new THREE.PlaneGeometry(T + ROAD_TILE_OVERLAP, T + ROAD_TILE_OVERLAP);
     roadMat = new THREE.MeshLambertMaterial({ color: 0x6a5440 });
     roadMat.polygonOffset = true;
     roadMat.polygonOffsetFactor = -1;
@@ -764,10 +764,14 @@ ${sdRoundBoxFn}`,
       waterFilletArr[o + 3] = wS && wW && !swD ? 1 : 0;
       wi += 1;
     };
+    const bridgeSet = new Set((s.bridge_tiles || []).map((b) => `${b.x},${b.y}`));
     const pushR = (tx, ty) => {
       if (ri >= MAX_ROAD) return;
+      if (bridgeSet.has(`${tx},${ty}`)) return;
       const { x, z } = _worldXZ(tx, ty);
-      _dummy.position.set(x, _groundY(tx, ty) + 1, z);
+      _dummy.position.set(x, _groundY(tx, ty) + 0.55, z);
+      _dummy.rotation.set(-Math.PI / 2, 0, 0);
+      _dummy.scale.set(1, 1, 1);
       _dummy.updateMatrix();
       roadMesh.setMatrixAt(ri++, _dummy.matrix);
     };

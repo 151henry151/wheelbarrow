@@ -21,6 +21,9 @@ _MAX_W_UNIT = 2.5  # match client RESOURCE_WEIGHT_MAX_UNIT
 
 BASE_MOVE_TILES_PER_SEC = 6.0
 TURN_RADIANS_PER_SEC = 2.8
+# Faster on dirt roads; gentle steering aligns to road axis when on a road tile.
+ROAD_SPEED_MULT = 1.38
+ROAD_SNAP_STRENGTH = 2.6  # radians/sec toward cardinal road axis when on road
 
 
 def player_tile_xy(p: dict) -> tuple[int, int]:
@@ -80,26 +83,93 @@ def angle_to_cardinal_dir(angle: float) -> str:
     return best
 
 
-def _walkable_tile(x: int, y: int, water_tiles: set[tuple[int, int]]) -> bool:
-    return (x, y) not in water_tiles
+def _walkable_tile(
+    tx: int,
+    ty: int,
+    water_tiles: set[tuple[int, int]],
+    bridge_tiles: set[tuple[int, int]],
+) -> bool:
+    if (tx, ty) in bridge_tiles:
+        return True
+    return (tx, ty) not in water_tiles
 
 
 def _segment_hits_water(
-    x0: float, y0: float, x1: float, y1: float, water_tiles: set[tuple[int, int]],
+    x0: float,
+    y0: float,
+    x1: float,
+    y1: float,
+    water_tiles: set[tuple[int, int]],
+    bridge_tiles: set[tuple[int, int]],
 ) -> bool:
     for t in (0.12, 0.35, 0.55, 0.75, 0.92):
         x = x0 + (x1 - x0) * t
         y = y0 + (y1 - y0) * t
         tx, ty = int(math.floor(x)), int(math.floor(y))
-        if (tx, ty) in water_tiles:
+        if not _walkable_tile(tx, ty, water_tiles, bridge_tiles):
             return True
     return False
+
+
+def _segment_hits_blocked(
+    x0: float,
+    y0: float,
+    x1: float,
+    y1: float,
+    blocked: set[tuple[int, int]],
+) -> bool:
+    """Block entering a blocked tile from outside. Samples still on the departure tile are ignored so
+    players can drive off structures / nodes / pile tiles they are already standing on."""
+    sx, sy = int(math.floor(x0)), int(math.floor(y0))
+    for t in (0.12, 0.35, 0.55, 0.75, 0.92):
+        x = x0 + (x1 - x0) * t
+        y = y0 + (y1 - y0) * t
+        tx, ty = int(math.floor(x)), int(math.floor(y))
+        if (tx, ty) == (sx, sy):
+            continue
+        if (tx, ty) in blocked:
+            return True
+    return False
+
+
+def _road_snap_angle(
+    tx: int,
+    ty: int,
+    angle: float,
+    road_tiles: set[tuple[int, int]],
+    dt: float,
+) -> float:
+    if (tx, ty) not in road_tiles:
+        return angle
+    has_e = (tx + 1, ty) in road_tiles
+    has_w = (tx - 1, ty) in road_tiles
+    has_n = (tx, ty - 1) in road_tiles
+    has_s = (tx, ty + 1) in road_tiles
+    ew = has_e or has_w
+    ns = has_n or has_s
+    if not ew and not ns:
+        return angle
+    if ew and not ns:
+        target = 0.0 if math.cos(angle) >= 0 else math.pi
+    elif ns and not ew:
+        target = math.pi / 2 if math.sin(angle) >= 0 else -math.pi / 2
+    else:
+        cands = (0.0, math.pi, math.pi / 2, -math.pi / 2)
+        target = min(
+            cands,
+            key=lambda c: abs(((angle - c + math.pi) % (2 * math.pi)) - math.pi),
+        )
+    da = ((target - angle + math.pi) % (2 * math.pi)) - math.pi
+    return angle + da * min(1.0, ROAD_SNAP_STRENGTH * dt)
 
 
 def integrate_player_movement(
     player: dict,
     dt: float,
     water_tiles: set[tuple[int, int]],
+    bridge_tiles: set[tuple[int, int]],
+    blocked_tiles: set[tuple[int, int]],
+    road_tiles: set[tuple[int, int]],
 ) -> list[str]:
     """Apply _input_fwd / _input_turn; returns wheelbarrow events from wear."""
     fwd = float(player.get("_input_fwd", 0.0) or 0.0)
@@ -116,6 +186,10 @@ def integrate_player_movement(
         while angle < -math.pi:
             angle += 2.0 * math.pi
 
+    tx0, ty0 = player_tile_xy(player)
+    if (tx0, ty0) in road_tiles and (abs(fwd) > 1e-6 or abs(turn) < 1e-6):
+        angle = _road_snap_angle(tx0, ty0, angle, road_tiles, dt)
+
     player["angle"] = angle
 
     events: list[str] = []
@@ -126,7 +200,9 @@ def integrate_player_movement(
     load_m = load_speed_mult(player)
     flat_m = 3.0 if player.get("flat_tire") else 1.0
     terr_m = terrain_interval_mult(float(player["x"]), float(player["y"]), angle)
-    speed = BASE_MOVE_TILES_PER_SEC / load_m / flat_m / terr_m
+    on_road = (tx0, ty0) in road_tiles
+    road_m = ROAD_SPEED_MULT if on_road else 1.0
+    speed = BASE_MOVE_TILES_PER_SEC / load_m / flat_m / terr_m * road_m
     dist = abs(fwd) * speed * dt
     if dist <= 1e-9:
         return events
@@ -142,11 +218,17 @@ def integrate_player_movement(
     nx = max(0.0, min(float(WORLD_W) - 1e-7, nx))
     ny = max(0.0, min(float(WORLD_H) - 1e-7, ny))
 
-    if _segment_hits_water(ox, oy, nx, ny, water_tiles):
+    if _segment_hits_water(ox, oy, nx, ny, water_tiles, bridge_tiles):
+        return events
+    if _segment_hits_blocked(ox, oy, nx, ny, blocked_tiles):
         return events
 
     tx, ty = int(math.floor(nx)), int(math.floor(ny))
-    if not _walkable_tile(tx, ty, water_tiles):
+    sx, sy = int(math.floor(ox)), int(math.floor(oy))
+    if not _walkable_tile(tx, ty, water_tiles, bridge_tiles):
+        return events
+    # Reject entering a blocked tile from another tile; allow leaving or nudging within same tile.
+    if (tx, ty) in blocked_tiles and (tx, ty) != (sx, sy):
         return events
 
     player["x"], player["y"] = nx, ny

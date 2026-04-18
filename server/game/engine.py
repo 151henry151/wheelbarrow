@@ -90,7 +90,7 @@ def _migrate_pocket_fertilizer_to_bucket(player: dict) -> None:
 
 
 def _near_shop(player: dict, shop_key: str, towns: dict[int, dict]) -> bool:
-    px, py = player["x"], player["y"]
+    ptx, pty = player_tile_xy(player)
     for town in towns.values():
         d = town.get("npc_district")
         if not d:
@@ -99,23 +99,28 @@ def _near_shop(player: dict, shop_key: str, towns: dict[int, dict]) -> bool:
         if not pos or len(pos) < 2:
             continue
         sx, sy = int(pos[0]), int(pos[1])
-        if abs(px - sx) <= NPC_SHOP_ADJACENCY and abs(py - sy) <= NPC_SHOP_ADJACENCY:
+        if max(abs(ptx - sx), abs(pty - sy)) <= NPC_SHOP_ADJACENCY:
             return True
     if shop_key in NPC_SHOP_LOCATIONS:
         sx, sy = NPC_SHOP_LOCATIONS[shop_key]
-        if abs(px - sx) <= NPC_SHOP_ADJACENCY and abs(py - sy) <= NPC_SHOP_ADJACENCY:
+        if max(abs(ptx - sx), abs(pty - sy)) <= NPC_SHOP_ADJACENCY:
             return True
     return False
 
 
 def _at_any_npc_market(player: dict, towns: dict[int, dict]) -> bool:
-    px, py = player_tile_xy(player)
+    ptx, pty = player_tile_xy(player)
     for town in towns.values():
         d = town.get("npc_district") or {}
         m = d.get("market")
-        if m and len(m) >= 2 and px == int(m[0]) and py == int(m[1]):
-            return True
-    return (px, py) == MARKET_TILE
+        if m and len(m) >= 2:
+            mx, my = int(m[0]), int(m[1])
+            if max(abs(ptx - mx), abs(pty - my)) <= 1:
+                return True
+    mx, my = MARKET_TILE
+    if max(abs(ptx - mx), abs(pty - my)) <= 1:
+        return True
+    return False
 
 def _dir_offset(direction: str) -> tuple[int, int]:
     return {"up": (0, -1), "down": (0, 1), "left": (-1, 0), "right": (1, 0)}.get(
@@ -156,6 +161,7 @@ class GameEngine:
         # Soil: (x,y) -> 1 tilled (ready for seeds), 0 untilled / needs till
         self.soil: dict[tuple[int, int], int] = {}
         self.road_tiles: set[tuple[int, int]] = set()
+        self.protected_road_tiles: set[tuple[int, int]] = set()
         self.water_tiles: set[tuple[int, int]] = set()
         self.bridge_tiles: set[tuple[int, int]] = set()
         self.poor_soil: set[tuple[int, int]] = set()
@@ -247,7 +253,9 @@ class GameEngine:
 
         await queries.ensure_world_roads_table()
         await queries.migrate_resource_piles_parcel_optional()
-        self.road_tiles = set(await queries.load_all_roads())
+        road_rows = await queries.load_all_roads_with_protected()
+        self.road_tiles = {(r[0], r[1]) for r in road_rows}
+        self.protected_road_tiles = {(r[0], r[1]) for r in road_rows if r[2]}
         if not self.road_tiles:
             await self._seed_initial_npc_roads()
         for tid in npc_district_rebuilt:
@@ -444,6 +452,61 @@ class GameEngine:
         tx, ty = player_tile_xy(player)
         pid = self.parcel_at.get((tx, ty))
         return self.world_parcels.get(pid) if pid else None
+
+    def _parcel_for_tile(self, tx: int, ty: int) -> Optional[dict]:
+        pid = self.parcel_at.get((tx, ty))
+        return self.world_parcels.get(pid) if pid else None
+
+    def _movement_blocked_tiles(self) -> set[tuple[int, int]]:
+        """Tiles wheelbarrows cannot enter: nodes, structures, tiles with resource piles."""
+        blocked: set[tuple[int, int]] = set()
+        for n in {**self.nodes, **self.structures}.values():
+            blocked.add((int(n["x"]), int(n["y"])))
+        for (px, py), pmap in self.piles.items():
+            if any(float(p.get("amount", 0) or 0) > 0 for p in pmap.values()):
+                blocked.add((px, py))
+        return blocked
+
+    def _pick_adjacent_structure(
+        self,
+        ptx: int,
+        pty: int,
+        cands: list[dict],
+    ) -> dict | None:
+        """Prefer tile underfoot; else unique candidate within Chebyshev 1."""
+        if not cands:
+            return None
+        on = [n for n in cands if int(n["x"]) == ptx and int(n["y"]) == pty]
+        if len(on) == 1:
+            return on[0]
+        if len(cands) == 1:
+            return cands[0]
+        return None
+
+    def _pick_pile_near(
+        self,
+        ptx: int,
+        pty: int,
+        resource_type: str,
+        pred,
+    ) -> tuple[tuple[int, int], dict] | None:
+        """Pile of resource_type on a tile within Chebyshev 1 satisfying pred(pile)."""
+        cands: list[tuple[tuple[int, int], dict]] = []
+        for key, pmap in self.piles.items():
+            px, py = key
+            if max(abs(ptx - px), abs(pty - py)) > 1:
+                continue
+            pile = pmap.get(resource_type)
+            if pile and pred(pile):
+                cands.append((key, pile))
+        if not cands:
+            return None
+        on = [(k, p) for k, p in cands if k == (ptx, pty)]
+        if len(on) == 1:
+            return on[0]
+        if len(cands) == 1:
+            return cands[0]
+        return None
 
     def _parcel_owning_tile(self, x: int, y: int) -> Optional[dict]:
         pid = self.parcel_at.get((x, y))
@@ -668,6 +731,9 @@ class GameEngine:
                 return
 
         tx, ty = player_tile_xy(player)
+        if (tx, ty) in self.protected_road_tiles:
+            await self._send(player_id, {"type": "notice", "msg": "Can't build on public roads."})
+            return
         if (tx, ty) in self.water_tiles:
             await self._send(player_id, {"type": "notice", "msg": "Can't build on water — fill it or bridge it first."})
             return
@@ -712,13 +778,17 @@ class GameEngine:
         player = self.players.get(player_id)
         if not player:
             return
-        tx, ty = player_tile_xy(player)
-        node = next(
-            (n for n in self.structures.values() if n["x"] == tx and n["y"] == ty),
-            None,
-        )
+        ptx, pty = player_tile_xy(player)
+        cands = [
+            n for n in self.structures.values()
+            if n.get("construction_active")
+            and n.get("owner_id") == player_id
+            and max(abs(ptx - int(n["x"])), abs(pty - int(n["y"]))) <= 1
+        ]
+        node = self._pick_adjacent_structure(ptx, pty, cands)
         if not node or not node.get("construction_active"):
-            await self._send(player_id, {"type": "notice", "msg": "No construction site here."})
+            await self._send(player_id, {"type": "notice",
+                "msg": "No construction site here — stand on or next to your site."})
             return
         if node.get("owner_id") != player_id:
             await self._send(player_id, {"type": "notice", "msg": "Not your construction site."})
@@ -809,10 +879,17 @@ class GameEngine:
         player = self.players.get(player_id)
         if not player:
             return
-        tx, ty = player_tile_xy(player)
-        node = next((n for n in self.structures.values() if n["x"] == tx and n["y"] == ty), None)
+        ptx, pty = player_tile_xy(player)
+        cands = [
+            n for n in self.structures.values()
+            if n.get("construction_active")
+            and n.get("owner_id") == player_id
+            and max(abs(ptx - int(n["x"])), abs(pty - int(n["y"]))) <= 1
+        ]
+        node = self._pick_adjacent_structure(ptx, pty, cands)
         if not node or not node.get("construction_active"):
-            await self._send(player_id, {"type": "notice", "msg": "No active construction site here."})
+            await self._send(player_id, {"type": "notice",
+                "msg": "No active construction site here — stand on or next to the site."})
             return
         if node.get("owner_id") != player_id:
             await self._send(player_id, {"type": "notice", "msg": "Not your construction site."})
@@ -820,6 +897,7 @@ class GameEngine:
         cons = (node.get("config") or {}).get("construction") or {}
         deposited = cons.get("deposited") or {}
         sid = node["id"]
+        tx, ty = int(node["x"]), int(node["y"])
         await queries.delete_structure(sid)
         del self.structures[sid]
         refund = {k: float(v) for k, v in deposited.items() if float(v) > 0}
@@ -833,10 +911,17 @@ class GameEngine:
         player = self.players.get(player_id)
         if not player:
             return
-        tx, ty = player_tile_xy(player)
-        node = next((n for n in self.structures.values() if n["x"] == tx and n["y"] == ty), None)
+        ptx, pty = player_tile_xy(player)
+        cands = [
+            n for n in self.structures.values()
+            if not n.get("construction_active")
+            and n.get("owner_id") == player_id
+            and max(abs(ptx - int(n["x"])), abs(pty - int(n["y"]))) <= 1
+        ]
+        node = self._pick_adjacent_structure(ptx, pty, cands)
         if not node:
-            await self._send(player_id, {"type": "notice", "msg": "Nothing built here."})
+            await self._send(player_id, {"type": "notice",
+                "msg": "Nothing to tear down — stand on or next to one of your buildings."})
             return
         if node.get("construction_active"):
             await self._send(player_id, {"type": "notice", "msg": "Use cancel ([X]) while the site is under construction."})
@@ -876,6 +961,7 @@ class GameEngine:
                 if a > 0:
                     refund[k] = refund.get(k, 0) + round(a, 2)
         sid = node["id"]
+        tx, ty = int(node["x"]), int(node["y"])
         await queries.delete_structure(sid)
         del self.structures[sid]
         await self._refund_materials_to_piles(player_id, tx, ty, refund)
@@ -889,6 +975,9 @@ class GameEngine:
         if not player:
             return
         tx, ty = player_tile_xy(player)
+        if (tx, ty) in self.protected_road_tiles:
+            await self._send(player_id, {"type": "notice", "msg": "Public roads can't be altered."})
+            return
         parcel = self._get_player_parcel(player)
         if not parcel or parcel.get("owner_id") != player_id:
             await self._send(player_id, {"type": "notice", "msg": "Stand on your own land to improve soil."})
@@ -1000,14 +1089,17 @@ class GameEngine:
         player = self.players.get(player_id)
         if not player:
             return
-        tx, ty = player_tile_xy(player)
-        node = next(
-            (n for n in self.structures.values()
-             if n.get("is_silo") and n["x"] == tx and n["y"] == ty and not n.get("construction_active")),
-            None,
-        )
+        ptx, pty = player_tile_xy(player)
+        cands = [
+            n for n in self.structures.values()
+            if n.get("is_silo")
+            and not n.get("construction_active")
+            and n.get("owner_id") == player_id
+            and max(abs(ptx - int(n["x"])), abs(pty - int(n["y"]))) <= 1
+        ]
+        node = self._pick_adjacent_structure(ptx, pty, cands)
         if not node or node.get("owner_id") != player_id:
-            await self._send(player_id, {"type": "notice", "msg": "Stand on your silo to withdraw grain."})
+            await self._send(player_id, {"type": "notice", "msg": "Stand on or next to your silo to withdraw grain."})
             return
         inv = node.setdefault("inventory", {})
         w = float(inv.get("wheat", 0) or 0)
@@ -1040,19 +1132,16 @@ class GameEngine:
         if not bucket:
             await self._send(player_id, {"type": "notice", "msg": "Bucket is empty."})
             return
-        tx, ty = player_tile_xy(player)
-        silo = next(
-            (
-                n
-                for n in self.structures.values()
-                if n.get("is_silo")
-                and int(n["x"]) == tx
-                and int(n["y"]) == ty
-                and not n.get("construction_active")
-                and n.get("owner_id") == player_id
-            ),
-            None,
-        )
+        ptx, pty = player_tile_xy(player)
+        silo_cands = [
+            n for n in self.structures.values()
+            if n.get("is_silo")
+            and not n.get("construction_active")
+            and n.get("owner_id") == player_id
+            and max(abs(ptx - int(n["x"])), abs(pty - int(n["y"]))) <= 1
+        ]
+        silo = self._pick_adjacent_structure(ptx, pty, silo_cands)
+        tx, ty = ptx, pty
         silo_put = 0.0
         if silo:
             sdef = STRUCTURE_DEFS.get("silo", {})
@@ -1075,6 +1164,10 @@ class GameEngine:
                 "type": "notice",
                 "msg": f"Stored {round(silo_put, 1)} wheat in the silo.",
             })
+            return
+
+        if (tx, ty) in self.protected_road_tiles:
+            await self._send(player_id, {"type": "notice", "msg": "Can't unload onto public roads."})
             return
 
         pid_at = self.parcel_at.get((tx, ty))
@@ -1107,10 +1200,17 @@ class GameEngine:
         player = self.players.get(player_id)
         if not player:
             return
-        key  = player_tile_xy(player)
-        pile = self.piles.get(key, {}).get(resource_type)
-        if not pile or pile.get("owner_id") != player_id:
+        ptx, pty = player_tile_xy(player)
+        picked = self._pick_pile_near(
+            ptx, pty, resource_type,
+            lambda p: p.get("owner_id") == player_id,
+        )
+        if not picked:
             await self._send(player_id, {"type": "notice", "msg": "No pile of that type here that you own."})
+            return
+        key, pile = picked
+        if key in self.protected_road_tiles:
+            await self._send(player_id, {"type": "notice", "msg": "Can't trade on public roads."})
             return
         pk = self.parcel_at.get(key)
         par = self.world_parcels.get(pk) if pk else None
@@ -1134,14 +1234,15 @@ class GameEngine:
         player = self.players.get(player_id)
         if not player:
             return
-        key   = player_tile_xy(player)
-        pile  = self.piles.get(key, {}).get(resource_type)
-        if not pile or pile.get("sell_price") is None:
+        ptx, pty = player_tile_xy(player)
+        picked = self._pick_pile_near(
+            ptx, pty, resource_type,
+            lambda p: p.get("sell_price") is not None and p.get("owner_id") != player_id,
+        )
+        if not picked:
             await self._send(player_id, {"type": "notice", "msg": "No priced pile here."})
             return
-        if pile.get("owner_id") == player_id:
-            await self._send(player_id, {"type": "notice", "msg": "That's your own pile."})
-            return
+        key, pile = picked
         can = min(float(amount), pile["amount"], player["coins"] / pile["sell_price"])
         if can <= 0:
             await self._send(player_id, {"type": "notice",
@@ -1175,7 +1276,7 @@ class GameEngine:
         })
         tax_str = f" (+{tax}c town tax)" if tax else ""
         await self._send(player_id, {"type": "notice",
-            "msg": f"Paid {cost}c for {can} {resource_type}. Stand on the pile to load into your barrow.{tax_str}"})
+            "msg": f"Paid {cost}c for {can} {resource_type}. Stand on or next to the pile to load into your barrow.{tax_str}"})
 
     # ---- NPC shops ----------------------------------------------------------
 
@@ -1304,13 +1405,37 @@ class GameEngine:
         player = self.players.get(player_id)
         if not player:
             return
-        tx, ty = player_tile_xy(player)
-        parcel  = self._get_player_parcel(player)
-        crop    = self.crops.get((tx, ty))
+        ptx, pty = player_tile_xy(player)
         now_utc = datetime.datetime.utcnow()
+
+        def _tile_order():
+            yield (ptx, pty)
+            for dx in (-1, 0, 1):
+                for dy in (-1, 0, 1):
+                    if dx == 0 and dy == 0:
+                        continue
+                    yield (ptx + dx, pty + dy)
+
+        crop = None
+        tx = ty = None
+        parcel = None
+        for cx, cy in _tile_order():
+            c = self.crops.get((cx, cy))
+            if not c:
+                continue
+            par = self._parcel_for_tile(cx, cy)
+            if par and par.get("owner_id") == player_id:
+                crop = c
+                tx, ty = cx, cy
+                parcel = par
+                break
 
         # Frost-killed crop — till to clear stubble and prepare soil (spring+ only; frozen in winter)
         if crop and crop.get("winter_dead"):
+            if (tx, ty) in self.protected_road_tiles:
+                await self._send(player_id, {"type": "notice",
+                    "msg": "Public roads can't be farmed."})
+                return
             if self.season.season == 3:  # winter
                 await self._send(player_id, {"type": "notice",
                     "msg": "The ground is frozen — wait for spring to till away frosted crops."})
@@ -1338,6 +1463,10 @@ class GameEngine:
 
         # Growing crop (alive)
         if crop and not crop.get("winter_dead"):
+            if (tx, ty) in self.protected_road_tiles:
+                await self._send(player_id, {"type": "notice",
+                    "msg": "Public roads can't be farmed."})
+                return
             ready_at = crop["ready_at"]
             if isinstance(ready_at, str):
                 ready_at = datetime.datetime.fromisoformat(ready_at)
@@ -1418,9 +1547,20 @@ class GameEngine:
                 "msg": f"Crop growing. ~{mins} min left."})
             return
 
-        # No crop — own land only for till / plant
-        if not parcel or parcel.get("owner_id") != player_id:
+        # No crop — own land only for till / plant (tile within Chebyshev 1)
+        tx, ty = None, None
+        parcel = None
+        for cx, cy in _tile_order():
+            par = self._parcel_for_tile(cx, cy)
+            if par and par.get("owner_id") == player_id:
+                tx, ty = cx, cy
+                parcel = par
+                break
+        if not parcel:
             await self._send(player_id, {"type": "notice", "msg": "You can only farm on your own land."})
+            return
+        if (tx, ty) in self.protected_road_tiles:
+            await self._send(player_id, {"type": "notice", "msg": "Public roads can't be farmed."})
             return
 
         if self._tile_has_blocking_pile(tx, ty):
@@ -1476,12 +1616,16 @@ class GameEngine:
         player = self.players.get(player_id)
         if not player or not isinstance(prices, dict):
             return
-        tx, ty = player_tile_xy(player)
-        node   = next((n for n in self.structures.values()
-                       if n.get("is_market") and n["x"] == tx and n["y"] == ty
-                       and n["owner_id"] == player_id), None)
+        ptx, pty = player_tile_xy(player)
+        cands = [
+            n for n in self.structures.values()
+            if n.get("is_market")
+            and n.get("owner_id") == player_id
+            and max(abs(ptx - int(n["x"])), abs(pty - int(n["y"]))) <= 1
+        ]
+        node = self._pick_adjacent_structure(ptx, pty, cands)
         if not node:
-            await self._send(player_id, {"type": "notice", "msg": "Stand on your Player Market to configure it."})
+            await self._send(player_id, {"type": "notice", "msg": "Stand on or next to your Player Market to configure it."})
             return
         node["config"]["prices"] = prices
         await queries.save_structure(node)
@@ -1640,12 +1784,19 @@ class GameEngine:
         if not town or not town.get("hall_built"):
             await self._send(player_id, {"type": "notice", "msg": "No Town Hall here."})
             return
-        # Must be at Town Hall
-        hall = next((n for n in self.structures.values()
-                     if n.get("is_town_hall") and abs(n["x"]-player["x"])<=2
-                     and abs(n["y"]-player["y"])<=2 and self._get_player_town(player)), None)
+        ptx, pty = player_tile_xy(player)
+        hall = next(
+            (
+                n
+                for n in self.structures.values()
+                if n.get("is_town_hall")
+                and self._get_player_town(player)
+                and max(abs(ptx - int(n["x"])), abs(pty - int(n["y"]))) <= 1
+            ),
+            None,
+        )
         if not hall:
-            await self._send(player_id, {"type": "notice", "msg": "Stand near the Town Hall to vote."})
+            await self._send(player_id, {"type": "notice", "msg": "Stand on or next to the Town Hall to vote."})
             return
         # Check voting window
         next_el = town.get("next_election_at")
@@ -1677,12 +1828,15 @@ class GameEngine:
     async def tick(self, resource_tick_s: int, persist_interval_s: int):
         now = time.monotonic()
         dt = settings.game_tick_ms / 1000.0
+        blocked_movement = self._movement_blocked_tiles()
         for pid in list(self.sockets.keys()):
             pl = self.players.get(pid)
             if not pl:
                 continue
             try:
-                ev = integrate_player_movement(pl, dt, self.water_tiles)
+                ev = integrate_player_movement(
+                    pl, dt, self.water_tiles, self.bridge_tiles, blocked_movement, self.road_tiles,
+                )
                 self._dispatch_wb_move_events(pid, ev)
             except Exception:
                 logging.exception("integrate_player_movement")
@@ -1753,7 +1907,7 @@ class GameEngine:
                 rem = float(pl.get("remaining", 0))
                 if rem <= 0:
                     continue
-                if ptx != pl["x"] or pty != pl["y"]:
+                if max(abs(ptx - int(pl["x"])), abs(pty - int(pl["y"]))) > 1:
                     new_pending.append(pl)
                     continue
                 load = _bucket_total(player.get("bucket", {}))
@@ -1778,8 +1932,12 @@ class GameEngine:
 
             load = _bucket_total(player.get("bucket", {}))
             space = cap - load
-            pile_map = self.piles.get((ptx, pty))
-            if pile_map and space > 0:
+            pile_tiles = [(ptx, pty)]
+            pile_tiles += [(ptx + dx, pty + dy) for dx in (-1, 0, 1) for dy in (-1, 0, 1) if dx or dy]
+            for tcx, tcy in pile_tiles:
+                pile_map = self.piles.get((tcx, tcy))
+                if not pile_map or space <= 0:
+                    continue
                 for rtype, pile in list(pile_map.items()):
                     if not self._player_can_free_pick_pile(player, pile):
                         continue
@@ -1798,11 +1956,11 @@ class GameEngine:
                     player.setdefault("bucket", {})[rtype] = round(
                         player["bucket"].get(rtype, 0) + take, 2)
                     if pile["amount"] <= 0:
-                        del self.piles[(px, py)][rtype]
-                        await queries.delete_pile(px, py, rtype)
+                        del self.piles[(tcx, tcy)][rtype]
+                        await queries.delete_pile(tcx, tcy, rtype)
                     else:
                         await queries.upsert_pile(
-                            pile.get("parcel_id"), pile["owner_id"], px, py, rtype,
+                            pile.get("parcel_id"), pile["owner_id"], tcx, tcy, rtype,
                             pile["amount"], pile.get("sell_price"),
                         )
 

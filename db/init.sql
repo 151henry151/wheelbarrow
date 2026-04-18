@@ -107,6 +107,7 @@ CREATE TABLE IF NOT EXISTS resource_piles (
 CREATE TABLE IF NOT EXISTS world_roads (
     x INT NOT NULL,
     y INT NOT NULL,
+    protected TINYINT NOT NULL DEFAULT 0,
     PRIMARY KEY (x, y)
 );
 

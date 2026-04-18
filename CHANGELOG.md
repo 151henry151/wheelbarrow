@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.32] - 2026-04-18
+
+### Added
+- **`server/game/intertown_roads.py`**: **Plan** **MST+redundant** **inter-town** **roads** **with** **bridge** **tiles** **where** **paths** **cross** **water**
+- **`tests/test_movement_blocked.py`**: **Cover** **leaving** **vs** **entering** **blocked** **tiles**
+- **`requirements.txt`**: **List** **`pytest`** **for** **running** **`tests/`**
+
+### Changed
+- **`server/game/engine.py`**: **Block** **movement** **onto** **nodes,** **structures,** **and** **non-empty** **piles;** **load** **`protected`** **road** **tiles;** **extend** **many** **interactions** **to** **Chebyshev** **distance** **≤** **1;** **forbid** **building** **/** **farming** **/** **unloading** **on** **protected** **roads**
+- **`server/game/movement.py`**: **Pass** **water,** **bridges,** **blocked** **set,** **and** **roads;** **multiply** **speed** **on** **roads** **(fix** **inverted** **multiplier);** **treat** **blocked** **tiles** **as** **entry-only** **so** **players** **can** **drive** **off** **structures** **(e.g.** **NPC** **market)**
+- **`server/game/world_gen.py`**: **Insert** **inter-town** **protected** **roads** **and** **generated** **bridges** **after** **water**
+- **`server/db/queries.py`**: **`load_all_roads_with_protected`,** **`delete_water_tiles_bulk`,** **`insert_bridge_tiles_bulk`**
+- **`db/init.sql`**: **Add** **`world_roads.protected`**
+- **`client/js/renderer.js`**: **Draw** **roads** **as** **flat** **planes;** **omit** **road** **quads** **on** **bridge** **tiles**
+
 ## [0.12.31] - 2026-04-16
 
 ### Changed

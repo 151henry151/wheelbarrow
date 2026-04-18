@@ -391,6 +391,18 @@ async def insert_water_tiles_bulk(tiles: set[tuple[int, int]] | list[tuple[int, 
             )
 
 
+async def delete_water_tiles_bulk(tiles: set[tuple[int, int]] | list[tuple[int, int]]):
+    if not tiles:
+        return
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.executemany(
+                "DELETE FROM water_tiles WHERE x=%s AND y=%s",
+                [(tx, ty) for tx, ty in tiles],
+            )
+
+
 async def delete_water_tile(x: int, y: int):
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -404,6 +416,18 @@ async def load_all_water_tiles() -> list[tuple[int, int]]:
         async with conn.cursor() as cur:
             await cur.execute("SELECT x, y FROM water_tiles")
             return [(r[0], r[1]) for r in await cur.fetchall()]
+
+
+async def insert_bridge_tiles_bulk(tiles: set[tuple[int, int]] | list[tuple[int, int]]):
+    if not tiles:
+        return
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.executemany(
+                "INSERT IGNORE INTO bridge_tiles (x, y) VALUES (%s, %s)",
+                [(tx, ty) for tx, ty in tiles],
+            )
 
 
 async def insert_bridge_tile(x: int, y: int):
@@ -531,9 +555,20 @@ async def ensure_world_roads_table():
                 """CREATE TABLE IF NOT EXISTS world_roads (
                     x INT NOT NULL,
                     y INT NOT NULL,
+                    protected TINYINT NOT NULL DEFAULT 0,
                     PRIMARY KEY (x, y)
                 )""",
             )
+            await cur.execute(
+                """SELECT COUNT(*) FROM information_schema.COLUMNS
+                   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'world_roads'
+                   AND COLUMN_NAME = 'protected'""",
+            )
+            (pc,) = await cur.fetchone()
+            if not pc:
+                await cur.execute(
+                    "ALTER TABLE world_roads ADD COLUMN protected TINYINT NOT NULL DEFAULT 0",
+                )
 
 
 async def migrate_resource_piles_parcel_optional():
@@ -569,15 +604,37 @@ async def load_all_roads() -> list[tuple[int, int]]:
             return [(r[0], r[1]) for r in await cur.fetchall()]
 
 
-async def insert_road_bulk(tiles: list[tuple[int, int]]):
+async def load_all_roads_with_protected() -> list[tuple[int, int, int]]:
+    """(x, y, protected) — protected 1 = world / NPC network; 0 = player-grown."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("SELECT x, y, protected FROM world_roads")
+            return [(int(r[0]), int(r[1]), int(r[2] or 0)) for r in await cur.fetchall()]
+
+
+async def insert_road_bulk(tiles: list[tuple[int, int]], *, protected: int = 0):
     if not tiles:
         return
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             await cur.executemany(
-                "INSERT IGNORE INTO world_roads (x, y) VALUES (%s, %s)",
-                list(tiles),
+                "INSERT IGNORE INTO world_roads (x, y, protected) VALUES (%s, %s, %s)",
+                [(tx, ty, int(protected)) for tx, ty in tiles],
+            )
+
+
+async def insert_road_bulk_mixed(rows: list[tuple[int, int, int]]):
+    """(x, y, protected) per tile."""
+    if not rows:
+        return
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.executemany(
+                "INSERT IGNORE INTO world_roads (x, y, protected) VALUES (%s, %s, %s)",
+                list(rows),
             )
 
 

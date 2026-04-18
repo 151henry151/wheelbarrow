@@ -20,6 +20,7 @@ from server.game.constants import (
 )
 from server.game.town_npcs import place_npc_district
 from server.game.terrain_features import generate_water_features, generate_poor_soil_for_parcels
+from server.game.intertown_roads import plan_intertown_roads
 from server.db import queries
 
 # ---- Biome helpers ----------------------------------------------------------
@@ -633,11 +634,21 @@ async def generate_world_if_needed():
     node_pos = {(n["x"], n["y"]) for n in nodes}
     water = generate_water_features(rng, node_pos, towns)
     await queries.insert_water_tiles_bulk(water)
+
+    road_net, bridge_for_roads, water_remove = plan_intertown_roads(rng, towns, set(water))
+    if water_remove:
+        await queries.delete_water_tiles_bulk(water_remove)
+    if bridge_for_roads:
+        await queries.insert_bridge_tiles_bulk(bridge_for_roads)
+    if road_net:
+        await queries.insert_road_bulk(list(road_net), protected=1)
+
     poor = generate_poor_soil_for_parcels(rng, parcels)
     await queries.insert_poor_soil_bulk(poor)
 
     await queries.mark_world_generated()
     print(
         f"[world_gen] Done. {len(towns)} towns, {len(nodes)} nodes, {len(parcels)} parcels, "
-        f"{len(water)} water tiles (ponds, streams, major rivers), {len(poor)} poor-soil tiles.",
+        f"{len(water)} water tiles (ponds, streams, major rivers), {len(road_net)} inter-town road tiles, "
+        f"{len(bridge_for_roads)} road bridges, {len(poor)} poor-soil tiles.",
     )
