@@ -299,6 +299,11 @@ float sdRoundBox( vec2 p, vec2 b, vec4 r ) {
   vec2 q = abs(p)-b+r.x;
   return min(max(q.x,q.y),0.0) + length(max(q,0.0)) - r.x;
 }
+// Smooth union — avoids slivers where inner fillet disks meet the main rounded-rect SDF.
+float smin( float a, float b, float k ) {
+  float h = clamp( 0.5 + 0.5 * ( b - a ) / k, 0.0, 1.0 );
+  return mix( b, a, h ) - k * h * ( 1.0 - h );
+}
 `;
       shader.fragmentShader = shader.fragmentShader.replace(
         '#include <clipping_planes_pars_fragment>',
@@ -312,27 +317,29 @@ ${sdRoundBoxFn}`,
       shader.fragmentShader = shader.fragmentShader.replace(
         '#include <clipping_planes_fragment>',
         `#include <clipping_planes_fragment>
-	float wsm = 0.042;
+	float wsm = 0.045;
 	float wqs = ${wqs};
 	float Rf = 1.0;
 	vec2 puvW = (vWaterUv - 0.5) * 2.0 * wqs;
 	float dw = sdRoundBox( puvW, vec2( 1.028 ), vWaterR );
-	// Concave (inner) L-corners: union quarter-disks centered past the tile corner so radius matches Rc.
-	if ( vInnerFillet.x > 0.5 && puvW.x > 1.0 && puvW.y > 1.0 ) {
+	// Inner L-corners: disks centered at (±(1+Rf),±(1+Rf)) — tangent to p.x=±1 and p.y=±1; bleed into grass.
+	// Do NOT mask to p.x>1 && p.y>1 — that skipped the tangent strips and caused sharp slivers.
+	float sfk = 0.09;
+	if ( vInnerFillet.x > 0.5 ) {
 		float df = length( puvW - vec2( 1.0 + Rf, 1.0 + Rf ) ) - Rf;
-		dw = min( dw, df );
+		dw = smin( dw, df, sfk );
 	}
-	if ( vInnerFillet.y > 0.5 && puvW.x > 1.0 && puvW.y < -1.0 ) {
+	if ( vInnerFillet.y > 0.5 ) {
 		float df = length( puvW - vec2( 1.0 + Rf, -1.0 - Rf ) ) - Rf;
-		dw = min( dw, df );
+		dw = smin( dw, df, sfk );
 	}
-	if ( vInnerFillet.z > 0.5 && puvW.x < -1.0 && puvW.y > 1.0 ) {
+	if ( vInnerFillet.z > 0.5 ) {
 		float df = length( puvW - vec2( -1.0 - Rf, 1.0 + Rf ) ) - Rf;
-		dw = min( dw, df );
+		dw = smin( dw, df, sfk );
 	}
-	if ( vInnerFillet.w > 0.5 && puvW.x < -1.0 && puvW.y < -1.0 ) {
+	if ( vInnerFillet.w > 0.5 ) {
 		float df = length( puvW - vec2( -1.0 - Rf, -1.0 - Rf ) ) - Rf;
-		dw = min( dw, df );
+		dw = smin( dw, df, sfk );
 	}
 	if ( dw > wsm ) discard;
 `,

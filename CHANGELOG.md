@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.17] - 2026-04-17
+
+### Changed
+- **Client** (`client/js/renderer.js`): **Water** — **blend** **inner** **fillet** **disks** **into** **the** **main** **`sdRoundBox`** **with** **`smin`** **instead** **of** **`min`**, **and** **remove** **the** **`p.x>1 && p.y>1`** **quadrant** **masks** **so** **the** **arc** **meets** **straight** **edges** **without** **slivers**
+
 ## [0.12.16] - 2026-04-17
 
 ### Changed
