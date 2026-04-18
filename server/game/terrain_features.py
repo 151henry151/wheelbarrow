@@ -10,6 +10,13 @@ from typing import Iterable
 
 from server.game.constants import PLAYER_SPAWN, WORLD_H, WORLD_W
 
+# Major rivers (separate from ponds / short streams): 4–8 tiles wide, one or two long
+# chains each passing near many town centers (see generate_major_rivers).
+MAJOR_RIVER_WIDTH_MIN = 4
+MAJOR_RIVER_WIDTH_MAX = 8
+MAJOR_RIVER_CHAIN_MIN = 8
+MAJOR_RIVER_CHAIN_MAX = 10
+
 # Keep ponds/streams out of town *cores* and NPC clusters — not the full Voronoi polygon.
 # (Town boundaries partition the whole map; excluding “inside polygon” blocked all water.)
 WATER_EXCLUSION_RADIUS_FROM_TOWN_CENTER = 92
@@ -21,17 +28,9 @@ SPAWN_WATER_EXCLUSION = 30
 SPAWN_TOWN_WATER_CORE_RADIUS = 22
 
 
-def _too_close_to_town_core_or_shops(x: int, y: int, towns: list[dict]) -> bool:
-    """True if water should not appear here (near a town center or NPC site)."""
-    sx, sy = PLAYER_SPAWN
+def _too_close_to_npc_shops(x: int, y: int, towns: list[dict]) -> bool:
+    """NPC market + shop tiles — always block water (including major rivers)."""
     for t in towns:
-        cx, cy = int(t["center_x"]), int(t["center_y"])
-        dist = math.hypot(x - cx, y - cy)
-        if cx == sx and cy == sy:
-            if dist < SPAWN_TOWN_WATER_CORE_RADIUS:
-                return True
-        elif dist < WATER_EXCLUSION_RADIUS_FROM_TOWN_CENTER:
-            return True
         d = t.get("npc_district")
         if not d or not isinstance(d, dict):
             continue
@@ -42,6 +41,201 @@ def _too_close_to_town_core_or_shops(x: int, y: int, towns: list[dict]) -> bool:
             if max(abs(x - px), abs(y - py)) <= WATER_EXCLUSION_PADDING_AROUND_NPC:
                 return True
     return False
+
+
+def _too_close_to_town_core_or_shops(x: int, y: int, towns: list[dict]) -> bool:
+    """True if water should not appear here (near a town center or NPC site)."""
+    return _too_close_to_town_core(x, y, towns) or _too_close_to_npc_shops(x, y, towns)
+
+
+def _too_close_to_town_core(x: int, y: int, towns: list[dict]) -> bool:
+    """Pond/stream exclusion from town centers (not used for major rivers)."""
+    sx, sy = PLAYER_SPAWN
+    for t in towns:
+        cx, cy = int(t["center_x"]), int(t["center_y"])
+        dist = math.hypot(x - cx, y - cy)
+        if cx == sx and cy == sy:
+            if dist < SPAWN_TOWN_WATER_CORE_RADIUS:
+                return True
+        elif dist < WATER_EXCLUSION_RADIUS_FROM_TOWN_CENTER:
+            return True
+    return False
+
+
+def _dist_point_to_segment(
+    px: float,
+    py: float,
+    ax: float,
+    ay: float,
+    bx: float,
+    by: float,
+) -> float:
+    abx, aby = bx - ax, by - ay
+    apx, apy = px - ax, py - ay
+    ab2 = abx * abx + aby * aby
+    if ab2 < 1e-12:
+        return math.hypot(apx, apy)
+    t = max(0.0, min(1.0, (apx * abx + apy * aby) / ab2))
+    qx, qy = ax + t * abx, ay + t * aby
+    return math.hypot(px - qx, py - qy)
+
+
+def _densify_polyline(points: list[tuple[float, float]], step: float) -> list[tuple[float, float]]:
+    """Extra vertices along straight segments so thick strokes don't gap at bends."""
+    if len(points) < 2:
+        return list(points)
+    out: list[tuple[float, float]] = []
+    for i in range(len(points) - 1):
+        ax, ay = points[i]
+        bx, by = points[i + 1]
+        if i == 0:
+            out.append((ax, ay))
+        seg_len = math.hypot(bx - ax, by - ay)
+        n_sub = max(0, int(seg_len // step))
+        for j in range(1, n_sub + 1):
+            t = j / (n_sub + 1)
+            out.append((ax + t * (bx - ax), ay + t * (by - ay)))
+    out.append(points[-1])
+    return out
+
+
+def _rasterize_thick_polyline_segments(
+    points: list[tuple[float, float]],
+    width: float,
+    ok_tile,
+) -> set[tuple[int, int]]:
+    w2 = width / 2.0
+    out: set[tuple[int, int]] = set()
+    if len(points) < 2:
+        return out
+    for i in range(len(points) - 1):
+        ax, ay = points[i]
+        bx, by = points[i + 1]
+        seg_minx = int(math.floor(min(ax, bx) - w2 - 1))
+        seg_maxx = int(math.ceil(max(ax, bx) + w2 + 1))
+        seg_miny = int(math.floor(min(ay, by) - w2 - 1))
+        seg_maxy = int(math.ceil(max(ay, by) + w2 + 1))
+        for tx in range(seg_minx, seg_maxx + 1):
+            for ty in range(seg_miny, seg_maxy + 1):
+                px, py = tx + 0.5, ty + 0.5
+                if _dist_point_to_segment(px, py, ax, ay, bx, by) <= w2:
+                    if ok_tile(tx, ty):
+                        out.add((tx, ty))
+    return out
+
+
+def generate_major_rivers(
+    rng: random.Random,
+    node_positions: set[tuple[int, int]],
+    towns: list[dict],
+    extra_blocked: set[tuple[int, int]] | None = None,
+) -> set[tuple[int, int]]:
+    """
+    One or two long multi-town rivers (4–8 tiles wide). Each follows a polyline through
+    8–10 town centers ordered along a random axis — so a single river visits many towns
+    while most towns (40 total) still have no river. Rivers may pass through town land
+    but never through NPC shop footprints or blocked tiles.
+    """
+    blocked = set(extra_blocked or ())
+    if len(towns) < MAJOR_RIVER_CHAIN_MIN:
+        return set()
+
+    sx, sy = PLAYER_SPAWN
+    river_tiles: set[tuple[int, int]] = set()
+
+    def ok_river_tile(tx: int, ty: int) -> bool:
+        if not (8 <= tx < WORLD_W - 8 and 8 <= ty < WORLD_H - 8):
+            return False
+        if abs(tx - sx) <= SPAWN_WATER_EXCLUSION and abs(ty - sy) <= SPAWN_WATER_EXCLUSION:
+            return False
+        if (tx, ty) in node_positions or (tx, ty) in blocked:
+            return False
+        if _too_close_to_npc_shops(tx, ty, towns):
+            return False
+        return True
+
+    n_rivers = 1 if rng.random() < 0.55 else 2
+    thetas: list[float] = []
+    for r in range(n_rivers):
+        if r == 0:
+            thetas.append(rng.random() * 2 * math.pi)
+        else:
+            thetas.append(thetas[0] + rng.uniform(0.4, 1.15) * math.pi)
+
+    used_index_tuples: set[tuple[int, ...]] = set()
+
+    for ri in range(n_rivers):
+        theta = thetas[ri]
+        chain_len = rng.randint(MAJOR_RIVER_CHAIN_MIN, MAJOR_RIVER_CHAIN_MAX)
+        min_span = float(rng.randint(400, 560))
+
+        scored: list[tuple[float, int, float, float]] = []
+        for i, t in enumerate(towns):
+            cx, cy = int(t["center_x"]), int(t["center_y"])
+            proj = cx * math.cos(theta) + cy * math.sin(theta)
+            scored.append((proj, i, float(cx), float(cy)))
+        scored.sort(key=lambda x: x[0])
+
+        chain: list[tuple[float, float]] | None = None
+        for _ in range(140):
+            if len(scored) < chain_len:
+                break
+            start = rng.randint(0, len(scored) - chain_len)
+            window = scored[start : start + chain_len]
+            span = window[-1][0] - window[0][0]
+            if span < min_span:
+                continue
+            idx_tuple = tuple(w[1] for w in window)
+            if idx_tuple in used_index_tuples:
+                continue
+            used_index_tuples.add(idx_tuple)
+            chain = [(w[2], w[3]) for w in window]
+            break
+
+        if chain is None:
+            best_span = -1.0
+            best_tuple: tuple[int, ...] | None = None
+            best_chain: list[tuple[float, float]] | None = None
+            for start in range(0, max(1, len(scored) - chain_len + 1)):
+                window = scored[start : start + chain_len]
+                span = window[-1][0] - window[0][0]
+                idx_tuple = tuple(w[1] for w in window)
+                if idx_tuple in used_index_tuples:
+                    continue
+                if span > best_span:
+                    best_span = span
+                    best_tuple = idx_tuple
+                    best_chain = [(w[2], w[3]) for w in window]
+            if best_chain is not None and best_tuple is not None:
+                used_index_tuples.add(best_tuple)
+                chain = best_chain
+        if not chain:
+            continue
+
+        dx = chain[-1][0] - chain[0][0]
+        dy = chain[-1][1] - chain[0][1]
+        ln = math.hypot(dx, dy) or 1.0
+        px, py = -dy / ln, dx / ln
+        wobbled: list[tuple[float, float]] = []
+        for i, (fx, fy) in enumerate(chain):
+            if i == 0 or i == len(chain) - 1:
+                wobbled.append((fx, fy))
+            else:
+                off = rng.uniform(-20.0, 20.0)
+                wobbled.append((fx + px * off, fy + py * off))
+
+        dense = _densify_polyline(wobbled, step=2.5)
+        width = float(rng.randint(MAJOR_RIVER_WIDTH_MIN, MAJOR_RIVER_WIDTH_MAX))
+
+        def ok_here(tx: int, ty: int) -> bool:
+            if (tx, ty) in river_tiles:
+                return False
+            return ok_river_tile(tx, ty)
+
+        seg = _rasterize_thick_polyline_segments(dense, width, ok_here)
+        river_tiles |= seg
+
+    return river_tiles
 
 
 def generate_water_features(
@@ -105,6 +299,7 @@ def generate_water_features(
             x = max(10, min(WORLD_W - 11, x + dx + rng.randint(-1, 1)))
             y = max(10, min(WORLD_H - 11, y + dy + rng.randint(-1, 1)))
 
+    water |= generate_major_rivers(rng, node_positions, towns)
     return water
 
 

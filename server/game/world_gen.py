@@ -639,5 +639,5 @@ async def generate_world_if_needed():
     await queries.mark_world_generated()
     print(
         f"[world_gen] Done. {len(towns)} towns, {len(nodes)} nodes, {len(parcels)} parcels, "
-        f"{len(water)} water tiles, {len(poor)} poor-soil tiles.",
+        f"{len(water)} water tiles (ponds, streams, major rivers), {len(poor)} poor-soil tiles.",
     )

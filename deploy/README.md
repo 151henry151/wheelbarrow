@@ -90,14 +90,19 @@ After pulling a release that changes **water** or **poor-soil** logic:
    docker compose run --rm app python scripts/seed_spawn_ring_water.py
    ```
 
-5. **Restart** the service so the game process reloads terrain from the database:
+5. **Major rivers** (optional — long 4–8-tile-wide rivers through many towns; idempotent `INSERT IGNORE`; run once after upgrading from worlds that only had ponds/streams):
+   ```bash
+   docker compose run --rm app python scripts/add_major_rivers.py
+   ```
+
+6. **Restart** the service so the game process reloads terrain from the database:
    ```bash
    sudo systemctl restart wheelbarrow
    ```
 
 **Water:** If `water_tiles` was empty (e.g. older bug), a normal restart after upgrading the server code seeds ponds/streams automatically. If you already have water and only changed unrelated code, skip re-seeding.
 
-Run steps 2–4 only when the release notes require them; always end with **step 5** (restart).
+Run steps 2–5 only when the release notes require them; always end with **step 6** (restart).
 
 ## Resetting the database (destroys all data)
 

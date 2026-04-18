@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.28] - 2026-04-16
+
+### Changed
+- **Server** (`server/game/terrain_features.py`): **Add** **long** **multi-town** **rivers** **(4–8** **tiles** **wide,** **1–2** **systems** **per** **map)** **as** **thick** **polylines** **through** **8–10** **town** **centers** **per** **river** **—** **avoid** **NPC** **shop** **tiles** **and** **resource** **nodes;** **include** **in** **`generate_water_features`**
+- **Server** (`server/game/world_gen.py`): **Clarify** **world_gen** **log** **line** **for** **water** **count**
+- **Scripts** (`scripts/add_major_rivers.py`): **Add** **idempotent** **migration** **for** **existing** **worlds** **(skips** **bridge** **tiles)**
+- **Tests** (`tests/test_terrain_rivers.py`): **Add** **coverage** **for** **river** **geometry** **helpers**
+
 ## [0.12.27] - 2026-04-16
 
 ### Changed
