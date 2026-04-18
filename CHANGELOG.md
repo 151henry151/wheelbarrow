@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.48] - 2026-04-18
+
+### Changed
+- **Server** (`server/game/movement.py`): **Remove** **`_road_snap_angle`** **cardinal** **heading** **lock** **on** **road** **path** **tiles** **—** **keep** **`ROAD_SPEED_MULT`** **only**
+
 ## [0.12.47] - 2026-04-18
 
 ### Fixed

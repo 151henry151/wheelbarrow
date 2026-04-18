@@ -4,10 +4,7 @@ Angle 0 = east (+x), π/2 = south (+y); velocity (cos θ, sin θ).
 """
 from __future__ import annotations
 
-import logging
 import math
-
-logger = logging.getLogger("uvicorn.error")
 
 from server.game.constants import (
     RESOURCE_WEIGHTS,
@@ -24,9 +21,8 @@ _MAX_W_UNIT = 2.5  # match client RESOURCE_WEIGHT_MAX_UNIT
 
 BASE_MOVE_TILES_PER_SEC = 6.0
 TURN_RADIANS_PER_SEC = 2.8
-# Faster on dirt roads; gentle steering aligns to road axis when on a road tile.
+# Faster on dirt roads (no heading lock — steering stays fully player-controlled).
 ROAD_SPEED_MULT = 1.38
-ROAD_SNAP_STRENGTH = 2.6  # radians/sec toward cardinal road axis when on road
 
 
 def player_tile_xy(p: dict) -> tuple[int, int]:
@@ -135,37 +131,6 @@ def _segment_hits_blocked(
     return False
 
 
-def _road_snap_angle(
-    tx: int,
-    ty: int,
-    angle: float,
-    road_tiles: set[tuple[int, int]],
-    dt: float,
-) -> float:
-    if (tx, ty) not in road_tiles:
-        return angle
-    has_e = (tx + 1, ty) in road_tiles
-    has_w = (tx - 1, ty) in road_tiles
-    has_n = (tx, ty - 1) in road_tiles
-    has_s = (tx, ty + 1) in road_tiles
-    ew = has_e or has_w
-    ns = has_n or has_s
-    if not ew and not ns:
-        return angle
-    if ew and not ns:
-        target = 0.0 if math.cos(angle) >= 0 else math.pi
-    elif ns and not ew:
-        target = math.pi / 2 if math.sin(angle) >= 0 else -math.pi / 2
-    else:
-        cands = (0.0, math.pi, math.pi / 2, -math.pi / 2)
-        target = min(
-            cands,
-            key=lambda c: abs(((angle - c + math.pi) % (2 * math.pi)) - math.pi),
-        )
-    da = ((target - angle + math.pi) % (2 * math.pi)) - math.pi
-    return angle + da * min(1.0, ROAD_SNAP_STRENGTH * dt)
-
-
 def integrate_player_movement(
     player: dict,
     dt: float,
@@ -190,8 +155,6 @@ def integrate_player_movement(
             angle += 2.0 * math.pi
 
     tx0, ty0 = player_tile_xy(player)
-    if (tx0, ty0) in road_tiles and (abs(fwd) > 1e-6 or abs(turn) < 1e-6):
-        angle = _road_snap_angle(tx0, ty0, angle, road_tiles, dt)
 
     player["angle"] = angle
 
@@ -221,24 +184,18 @@ def integrate_player_movement(
     nx = max(0.0, min(float(WORLD_W) - 1e-7, nx))
     ny = max(0.0, min(float(WORLD_H) - 1e-7, ny))
 
-    pid = player.get("id", "?")
     if _segment_hits_water(ox, oy, nx, ny, water_tiles, bridge_tiles):
-        logger.warning("DBG move blocked WATER pid=%s pos=(%.2f,%.2f) angle=%.3f fwd=%.2f", pid, ox, oy, angle, fwd)
         return events
     if _segment_hits_blocked(ox, oy, nx, ny, blocked_tiles):
-        logger.warning("DBG move blocked SEGMENT pid=%s pos=(%.2f,%.2f) angle=%.3f fwd=%.2f", pid, ox, oy, angle, fwd)
         return events
 
     tx, ty = int(math.floor(nx)), int(math.floor(ny))
     sx, sy = int(math.floor(ox)), int(math.floor(oy))
     if not _walkable_tile(tx, ty, water_tiles, bridge_tiles):
-        logger.warning("DBG move blocked DEST_WATER pid=%s pos=(%.2f,%.2f) dest=(%d,%d)", pid, ox, oy, tx, ty)
         return events
     # Reject entering a blocked tile from another tile; allow leaving or nudging within same tile.
     if (tx, ty) in blocked_tiles and (tx, ty) != (sx, sy):
-        logger.warning("DBG move blocked DEST_BLOCKED pid=%s pos=(%.2f,%.2f) dest=(%d,%d)", pid, ox, oy, tx, ty)
         return events
-    logger.info("DBG move OK pid=%s (%.2f,%.2f)->(%.2f,%.2f) fwd=%.2f", pid, ox, oy, nx, ny, fwd)
 
     player["x"], player["y"] = nx, ny
 
