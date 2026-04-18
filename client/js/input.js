@@ -6,11 +6,13 @@ const Input = (() => {
   /** Last sampled fwd (–1..1) for edge detect — snap facing when starting drive from rest. */
   let lastFwdSample = 0;
   /**
-   * Last JSON.stringify({fwd, turn}) sent. Server integrates from stored _input_fwd/_input_turn
-   * each tick, so ~30×/s redundant move frames flood the WebSocket and starve tick delivery.
-   * Send when fwd/turn changes; optional face_angle on one packet does not affect this key.
+   * Last JSON.stringify({fwd, turn}) sent — deduplicates idle {fwd:0,turn:0} spam.
+   * While movement keys are held we also re-send every MOVE_RESEND_MS so a single
+   * dropped message (asyncio.wait race on the server) does not freeze the barrow.
    */
   let lastSentMoveSig = JSON.stringify({ fwd: 0, turn: 0 });
+  let lastMoveSendTime = 0;
+  const MOVE_RESEND_MS = 50;
 
   const held = {};
 
@@ -106,8 +108,11 @@ const Input = (() => {
     lastFwdSample = fwd;
 
     const sig = _moveSig(msg);
-    if (sig === lastSentMoveSig) return;
+    const moving = (fwd !== 0 || turn !== 0);
+    const resendDue = moving && (now - lastMoveSendTime >= MOVE_RESEND_MS);
+    if (sig === lastSentMoveSig && !resendDue) return;
     lastSentMoveSig = sig;
+    lastMoveSendTime = now;
     sendFn(msg);
   }
 
@@ -119,6 +124,7 @@ const Input = (() => {
     for (const k of Object.keys(held)) delete held[k];
     lastFwdSample = 0;
     lastSentMoveSig = JSON.stringify({ fwd: 0, turn: 0 });
+    lastMoveSendTime = 0;
   }
 
   /**

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.45] - 2026-04-18
+
+### Fixed
+- **Server** (`server/main.py`): Handle the `asyncio.wait(FIRST_COMPLETED)` race where a client move message and a server tick complete in the same event-loop turn — the inbound message was silently discarded, leaving `_input_fwd`/`_input_turn` at zero and the wheelbarrow frozen
+- **Client** (`client/js/input.js`): Restore periodic re-send (every 50 ms) while movement keys are held so a single dropped move message does not permanently freeze the wheelbarrow; idle `{fwd:0, turn:0}` messages are still deduplicated
+
 ## [0.12.44] - 2026-04-16
 
 ### Fixed
