@@ -3,6 +3,7 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from server.game.constants import WS_SEND_TIMEOUT_S
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -60,10 +61,23 @@ async def websocket_endpoint(websocket: WebSocket, token: str):
         return
 
     await websocket.accept()
+
+    try:
+        await asyncio.wait_for(
+            websocket.send_json(engine.full_state(player["id"])),
+            timeout=WS_SEND_TIMEOUT_S,
+        )
+    except Exception:
+        logging.exception("wheelbarrow: initial websocket send failed")
+        try:
+            await websocket.close(code=1011)
+        except Exception:
+            pass
+        return
+
     engine.add_socket(player["id"], websocket)
 
     try:
-        await websocket.send_json(engine.full_state(player["id"]))
         while True:
             msg = await websocket.receive_json()
             try:
@@ -71,10 +85,13 @@ async def websocket_endpoint(websocket: WebSocket, token: str):
             except Exception:
                 logging.exception("handle_input failed")
                 try:
-                    await websocket.send_json({
-                        "type": "notice",
-                        "msg": "Server hit an error on that action — try again or refresh the page.",
-                    })
+                    await asyncio.wait_for(
+                        websocket.send_json({
+                            "type": "notice",
+                            "msg": "Server hit an error on that action — try again or refresh the page.",
+                        }),
+                        timeout=WS_SEND_TIMEOUT_S,
+                    )
                 except Exception:
                     pass
     except WebSocketDisconnect:

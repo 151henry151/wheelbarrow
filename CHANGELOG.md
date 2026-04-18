@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.37] - 2026-04-18
+
+### Fixed
+- **Server** (`server/game/constants.py`, `server/game/engine.py`, `server/main.py`): **Bound** **WebSocket** **`send_json`** **with** **`asyncio.wait_for`** **(`WS_SEND_TIMEOUT_S`);** **drop** **and** **close** **stalled** **clients** **so** **one** **browser** **that** **stops** **reading** **ticks** **cannot** **block** **the** **game** **loop** **for** **everyone**
+- **Client** (`client/js/ws.js`): **Defer** **`tick`** **handlers** **with** **`queueMicrotask`**, **catch** **`JSON.parse`** **and** **handler** **errors** **so** **the** **socket** **keeps** **draining**
+
 ## [0.12.36] - 2026-04-18
 
 ### Fixed

@@ -257,6 +257,10 @@ VIEWPORT_RADIUS = 72
 # Water/bridges use a slightly larger radius so ponds and rivers appear before the terrain edge.
 VIEWPORT_WATER_RADIUS = 100
 
+# Per-socket JSON send — if the browser stops draining WS frames (main thread busy), an
+# unbounded await send_json would stall the entire game loop and all players.
+WS_SEND_TIMEOUT_S = 2.0
+
 # Wild resource grid: extra scatter pass targets these (~2.5× vs single-pass baseline)
 MINERAL_NODE_TYPES = frozenset({"stone", "gravel", "clay", "dirt"})
 

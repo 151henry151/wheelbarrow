@@ -33,6 +33,7 @@ from server.game.constants import (
     MAX_TAX_RATE, ELECTION_CYCLE_DAYS, VOTING_WINDOW_HOURS,
     VIEWPORT_RADIUS,
     VIEWPORT_WATER_RADIUS,
+    WS_SEND_TIMEOUT_S,
 )
 from server.game.seasons import SeasonClock
 from server.game.wb_condition import (
@@ -2019,6 +2020,34 @@ class GameEngine:
             for p in self.players.values() if p["id"] in self.sockets
         ]
 
+    async def _send_json_ws_safe(self, ws: WebSocket, payload: dict, *, pid: int | None = None) -> bool:
+        """Send with timeout so one slow client cannot block the whole game loop."""
+        try:
+            await asyncio.wait_for(ws.send_json(payload), timeout=WS_SEND_TIMEOUT_S)
+            return True
+        except asyncio.TimeoutError:
+            logging.warning(
+                "wheelbarrow: websocket send timed out after %ss (client likely not reading); dropping player %s",
+                WS_SEND_TIMEOUT_S,
+                pid,
+            )
+            if pid is not None:
+                self.sockets.pop(pid, None)
+            asyncio.create_task(self._close_ws_noexcept(ws))
+            return False
+        except Exception:
+            logging.exception("wheelbarrow: websocket send failed for player %s", pid)
+            if pid is not None:
+                self.sockets.pop(pid, None)
+            asyncio.create_task(self._close_ws_noexcept(ws))
+            return False
+
+    async def _close_ws_noexcept(self, ws: WebSocket) -> None:
+        try:
+            await ws.close(code=1011)
+        except Exception:
+            pass
+
     async def _broadcast_state(self):
         if not self.sockets:
             return
@@ -2054,8 +2083,9 @@ class GameEngine:
             nearby_water = self._nearby_water_tiles(px, py)
             nearby_bridges = self._nearby_bridge_tiles(px, py)
             nearby_poor = self._nearby_poor_soil_tiles(px, py, pid)
-            try:
-                await ws.send_json({
+            await self._send_json_ws_safe(
+                ws,
+                {
                     "type":       "tick",
                     "players":    all_players,
                     "player":     self._player_wire(player),
@@ -2069,24 +2099,18 @@ class GameEngine:
                     "poor_soil_tiles": nearby_poor,
                     "prices":     self.prices,
                     "season":     self.season.wire(),
-                })
-            except Exception:
-                logging.exception("wheelbarrow: tick send_json failed for player %s", pid)
+                },
+                pid=pid,
+            )
 
     async def _broadcast_all(self, msg: dict):
-        for ws in list(self.sockets.values()):
-            try:
-                await ws.send_json(msg)
-            except Exception:
-                pass
+        for pid, ws in list(self.sockets.items()):
+            await self._send_json_ws_safe(ws, msg, pid=pid)
 
     async def _send(self, player_id: int, msg: dict):
         ws = self.sockets.get(player_id)
         if ws:
-            try:
-                await ws.send_json(msg)
-            except Exception:
-                pass
+            await self._send_json_ws_safe(ws, msg, pid=player_id)
 
     # ----------------------------------------------------------------- wires
 

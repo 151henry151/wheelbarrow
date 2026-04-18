@@ -11,9 +11,24 @@ const WS = (() => {
 
     socket.addEventListener('open', () => onOpen && onOpen());
     socket.addEventListener('message', e => {
-      const msg = JSON.parse(e.data);
-      const fn = handlers[msg.type];
-      if (fn) fn(msg);
+      // Defer so the browser can keep draining the TCP/WebSocket buffer while the game runs
+      // heavy tick handlers; otherwise server send_json can block and stall all players.
+      queueMicrotask(() => {
+        let msg;
+        try {
+          msg = JSON.parse(e.data);
+        } catch (err) {
+          console.warn('Wheelbarrow: invalid WS JSON', err);
+          return;
+        }
+        const fn = handlers[msg.type];
+        if (!fn) return;
+        try {
+          fn(msg);
+        } catch (err2) {
+          console.error('Wheelbarrow: WS handler error', msg.type, err2);
+        }
+      });
     });
     socket.addEventListener('close', () => {
       console.warn('WS disconnected');
