@@ -1,0 +1,11 @@
+---
+description: Never block tick() on synchronous full DB persist (causes movement freeze)
+globs: "server/game/engine.py"
+alwaysApply: false
+---
+
+# Persist and `tick()`
+
+Full-world MariaDB persist **must not** run as a long inline block inside `tick()` only. That blocks asyncio for seconds → **no movement** / periodic freezes (see v0.12.71 regression, v0.12.73 fix `8b37e22`, original `39fe5d7`).
+
+Use **`asyncio.create_task(self._do_persist())`** with **`_persist_task`** guard. Details: **`docs/ENGINE-TICK-AND-PERSIST.md`**.
