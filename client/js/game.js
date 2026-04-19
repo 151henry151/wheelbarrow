@@ -546,10 +546,17 @@ function openChatComposer() {
 function closeChatComposer() {
   const wrap = document.getElementById('chat-input-wrap');
   const input = document.getElementById('chat-input');
-  if (input) input.value = '';
+  if (input) {
+    input.value = '';
+    input.blur();
+  }
   if (wrap) wrap.style.display = 'none';
   const canvas = document.getElementById('game');
-  if (canvas) canvas.focus({ preventScroll: true });
+  if (canvas) {
+    requestAnimationFrame(() => {
+      canvas.focus({ preventScroll: true });
+    });
+  }
 }
 
 function sendChatMessage() {
@@ -561,9 +568,14 @@ function sendChatMessage() {
     WS.send({ type: 'chat', text });
   }
   input.value = '';
+  input.blur();
   wrap.style.display = 'none';
   const canvas = document.getElementById('game');
-  if (canvas) canvas.focus({ preventScroll: true });
+  if (canvas) {
+    requestAnimationFrame(() => {
+      canvas.focus({ preventScroll: true });
+    });
+  }
 }
 
 function showNotice(msg) {

@@ -931,7 +931,15 @@ class GameEngine:
                 d = angle_to_cardinal_dir(float(pl.get("angle", 0)))
             await self._bridge_deposit(player_id, d)
         elif t == "chat":
+            # Do not await — fan-out to every socket would block this player's WebSocket input loop
+            # and starve move_q handling (same class of bug as start_collect vs move in main.py).
+            asyncio.create_task(self._chat_broadcast_task(player_id, msg))
+
+    async def _chat_broadcast_task(self, player_id: int, msg: dict) -> None:
+        try:
             await self._chat_broadcast(player_id, msg)
+        except Exception:
+            logging.exception("wheelbarrow: chat broadcast failed for player %s", player_id)
 
     async def _chat_broadcast(self, player_id: int, msg: dict) -> None:
         """Global chat: one line, all connected clients; rate-limited per sender."""

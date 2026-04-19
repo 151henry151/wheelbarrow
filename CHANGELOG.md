@@ -10,6 +10,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **Docs** (`docs/ENGINE-TICK-AND-PERSIST.md`): Document why `tick()` must not block on full DB persist (asyncio/event-loop movement freeze; relation to v0.12.71 / v0.12.73); **Cursor** (`.cursor/rules/engine-tick-persist.mdc`)
 
+## [0.12.78] - 2026-04-19
+
+### Fixed
+- **Server** (`server/game/engine.py`): Schedule **`chat`** fan-out with **`asyncio.create_task`** so **`handle_input`** does not **`await`** **`_broadcast_all`** on the WebSocket input loop (avoids **move** starvation after chat, same class of issue as **`start_collect`** vs **`move`** in **`main.py`**).
+- **Server** (`server/main.py`): **Drain** **`move_q`** with **`get_nowait`** in a **loop** until empty before each **`wait(move_q, in_q)`** (match comment intent; helps when **`in_q`** competes with movement).
+
+## [0.12.77] - 2026-04-19
+
+### Fixed
+- **Client** (`client/js/game.js`, `client/js/input.js`): After chat, **`#chat-input`** could stay focused while hidden so **`input.js`** skipped all WASD/keyup — restore movement by **`blur()`** on close/send, **`requestAnimationFrame`** → canvas focus, and gate key capture on **`#chat-input`** only (not every `INPUT`).
+
 ## [0.12.76] - 2026-04-19
 
 ### Added
