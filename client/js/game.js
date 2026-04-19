@@ -1,5 +1,3 @@
-const GAME_VERSION = 'v0.12.63';
-
 // Mirrored from server/game/constants.py
 const WB_BARROW_MATERIAL_NAMES = { 1: 'plastic', 2: 'steel',    3: 'aluminium' };
 const WB_TIRE_TYPE_NAMES        = { 1: 'regular', 2: 'tubeless', 3: 'heavy-duty' };
@@ -117,6 +115,8 @@ const state = {
   sellAutopilotPile:   null,   // { x, y, resource_type } while running
   /** Set each frame: orbit yaw locked behind barrow while any move/turn key or autopilot */
   cameraFollowDriving: false,
+  /** While true + follow-driving: renderer snaps camera yaw to barrow (no lerp lag while steering). */
+  cameraTurnKeysHeld: false,
   _tickWaiters:        [],
   _soldWaiter:         null,
 };
@@ -195,9 +195,17 @@ function _nearNpcMarket(px, py) {
   return mks.some(m => Math.abs(m.x - px) <= 1 && Math.abs(m.y - py) <= 1);
 }
 
+/** True when player may use [Space] to sell — matches server `_at_any_npc_market` (Chebyshev ≤1 from market tile). */
 function _onNpcMarketTile(px, py) {
-  const mks = state.npc_markets || [];
-  return mks.some(m => m.x === px && m.y === py);
+  const markets = state.npc_markets && state.npc_markets.length
+    ? state.npc_markets
+    : [NPC_MARKET_FALLBACK];
+  const ptx = Math.floor(px);
+  const pty = Math.floor(py);
+  return markets.some(m =>
+    m.x !== undefined && m.y !== undefined
+    && Math.max(Math.abs(ptx - m.x), Math.abs(pty - m.y)) <= 1,
+  );
 }
 
 /** Matches server effective_bucket_cap (half while handle is snapped). */
@@ -423,8 +431,6 @@ function _checkTownCrossing() {
 function updateHud() {
   if (!state.player) return;
   if (!state.hudVisible) return;
-
-  document.getElementById('hud-version').textContent = GAME_VERSION;
 
   if (state.season) {
     const mins = Math.ceil(state.season.remaining_s / 60);
@@ -1271,6 +1277,9 @@ window.addEventListener('load', () => {
             && Input.isWheelbarrowControlActive()
           )
         )
+      );
+      state.cameraTurnKeysHeld = !!(
+        typeof Input.isTurnKeyHeld === 'function' && Input.isTurnKeyHeld()
       );
       Renderer.draw();
       updateHud();

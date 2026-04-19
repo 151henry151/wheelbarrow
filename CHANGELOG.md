@@ -7,30 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.12.63] - 2026-04-18
+## [0.12.64] - 2026-04-16
 
 ### Fixed
-- **Client** (`client/js/renderer.js`): Water tiles now render at the maximum of their four terrain corner heights (instead of the tile-center height). This prevents the surrounding grass mesh from bleeding through pond/river surfaces at tile seams, eliminating the visible grid/segmentation effect on ponds.
-- **Server** (`server/game/terrain_features.py`): Major rivers no longer skip the spawn-area exclusion zone. Rivers are world-spanning natural features and should flow through the whole map including the player start area; only ponds and streams keep the 30-tile spawn dry zone.
-
-## [0.12.62] - 2026-04-18
-
-### Fixed
-- **Server** (`server/game/engine.py`): Intra-town road paths now include the town center as a BFS site, so they connect to inter-town roads that terminate at the center. Previously there was a gap between the two road networks.
-- **Server** (`server/game/world_gen.py`): Resource nodes are now inserted after inter-town roads are generated; any node whose tile falls on a road is filtered out before insertion. Previously nodes could appear on top of road tiles.
-- **Server** (`server/game/world_gen.py`): Call `extra_ponds_outside_spawn_ring` during fresh world generation so ponds appear near spawn. Previously the function was only used as a migration helper and new worlds had no visible water close to the player start.
-- **Client** (`client/js/renderer.js`): Replace flat instanced-plane road tiles with a terrain-hugging `BufferGeometry` mesh. Each tile now has four corner vertices sampled at `Terrain.worldYFloat(tx±0.5, ty±0.5)`, eliminating the staircase effect at elevation changes and the disappearing-road artifact at low camera pitch. Road material uses `THREE.DoubleSide` so the mesh is visible from any angle.
-
-## [0.12.61] - 2026-04-18
-
-### Changed
-- **Server** (`server/game/world_gen.py`): Restore dense world-gen parameters that were reduced as a (mistaken) attempt to fix the movement freeze — forest cluster target back to 880 (from 92), cluster min spacing 8 (from 13), grid step 10 (from 25), grid hit probability 0.48 (from 0.35), meadow copse target 200 (from 0), forest biome threshold widened to 40% of the map, mineral cross-biome sprinkle (`MINERAL_QUAD`) restored, and boost multiplier back to 2.1× (from 1.5×).
-
-## [0.12.60] - 2026-04-18
-
-### Fixed
-- **Server** (`server/game/engine.py`): Move DB persist out of `tick()` into a background `asyncio.Task` — previously, saving all nodes/structures/towns sequentially inside `tick()` held the coroutine for 1–5 seconds, blocking `integrate_player_movement` from running on its 100ms cadence even though each individual `await` yielded (because `run_game_loop` cannot re-enter `tick()` while `tick()` is still awaiting). This is the root cause of the periodic ~5s movement freezes. Persist now fires as `asyncio.create_task(self._do_persist())` and `tick()` returns immediately. Overlapping persists (if one hasn't finished by the next interval) are skipped with a warning log.
-- **Server** (`server/game/engine.py`): Add per-section wall-clock logging inside `tick()` (move, resource-tick, broadcast) — logs a warning when any combination exceeds 150 ms so future regressions are visible in Docker logs without needing a profiler.
+- **Client** (`client/js/game.js`): **Treat** **NPC** **market** **sell** **range** **as** **Chebyshev** **distance** **≤** **1** **from** **market** **tile** **using** **floored** **player** **coords** **—** **matches** **server** **`_at_any_npc_market`** **so** **the** **`[Space]`** **sell** **hint** **shows** **when** **the** **sell** **action** **works**
+- **Client** (`client/js/input.js`, `client/js/game.js`, `client/js/renderer.js`): **Snap** **follow-camera** **yaw** **to** **the** **barrow** **heading** **while** **A/D** **or** **left/right** **turn** **keys** **are** **held;** **keep** **frame** **lerp** **when** **not** **steering** **so** **orbit→drive** **recenters** **smoothly**
 
 ## [0.12.59] - 2026-04-16
 
