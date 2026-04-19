@@ -153,6 +153,9 @@ class GameEngine:
         # Avoids calling ws.send_json from the game-loop task while receive_json blocks in another
         # task (can stall or reorder ASGI websocket I/O on some servers).
         self.out_queues: dict[int, asyncio.Queue] = {}
+        # Latest tick only (maxsize=1 in main.py) — unbounded out_q + 10Hz ticks can backlog if
+        # send_json lags, matching multi-second "stuck until queue drains" movement stalls.
+        self.tick_queues: dict[int, asyncio.Queue] = {}
         self.tokens:     dict[str, int]      = {}
         self.nodes:      dict[int, dict]     = {}    # resource nodes
         self.structures: dict[int, dict]     = {}    # player structures
@@ -663,14 +666,23 @@ class GameEngine:
         pid = self.tokens.get(token)
         return self.players.get(pid) if pid else None
 
-    def add_socket(self, player_id: int, ws: WebSocket, out_queue: asyncio.Queue | None = None):
+    def add_socket(
+        self,
+        player_id: int,
+        ws: WebSocket,
+        out_queue: asyncio.Queue | None = None,
+        tick_queue: asyncio.Queue | None = None,
+    ):
         self.sockets[player_id] = ws
         if out_queue is not None:
             self.out_queues[player_id] = out_queue
+        if tick_queue is not None:
+            self.tick_queues[player_id] = tick_queue
 
     async def remove_player(self, player_id: int):
         self.sockets.pop(player_id, None)
         self.out_queues.pop(player_id, None)
+        self.tick_queues.pop(player_id, None)
         player = self.players.get(player_id)
         if player:
             await queries.save_player(player)
@@ -2142,6 +2154,20 @@ class GameEngine:
 
     async def _send_json_ws_safe(self, ws: WebSocket, payload: dict, *, pid: int | None = None) -> bool:
         """Send JSON; on failure drop the socket so broadcasts do not error forever."""
+        if pid is not None and payload.get("type") == "tick" and pid in self.tick_queues:
+            q = self.tick_queues[pid]
+            try:
+                q.put_nowait(payload)
+            except asyncio.QueueFull:
+                try:
+                    q.get_nowait()
+                except asyncio.QueueEmpty:
+                    pass
+                try:
+                    q.put_nowait(payload)
+                except asyncio.QueueFull:
+                    pass
+            return True
         if pid is not None and pid in self.out_queues:
             q = self.out_queues[pid]
             try:
@@ -2154,6 +2180,7 @@ class GameEngine:
                 )
                 self.sockets.pop(pid, None)
                 self.out_queues.pop(pid, None)
+                self.tick_queues.pop(pid, None)
                 asyncio.create_task(self._close_ws_noexcept(ws))
                 return False
         try:
@@ -2164,6 +2191,7 @@ class GameEngine:
             if pid is not None:
                 self.sockets.pop(pid, None)
                 self.out_queues.pop(pid, None)
+                self.tick_queues.pop(pid, None)
             asyncio.create_task(self._close_ws_noexcept(ws))
             return False
 

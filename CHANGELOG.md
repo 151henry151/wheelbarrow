@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.58] - 2026-04-18
+
+### Fixed
+- **Server** (`server/main.py`, `server/game/engine.py`): **Deliver** **`tick`** **WebSocket** **payloads** **via** **`asyncio.Queue(maxsize=1)`** **with** **replace-on-overflow** **—** **only** **the** **latest** **tick** **is** **queued** **for** **send;** **stops** **unbounded** **`out_q`** **growth** **when** **`send_json`** **lags** **the** **game** **loop** **(matches** **~10–15s** **“stuck** **until** **it** **clears”** **after** **~15** **tiles)**
+
 ## [0.12.57] - 2026-04-18
 
 ### Fixed

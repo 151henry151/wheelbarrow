@@ -71,10 +71,11 @@ async def websocket_endpoint(websocket: WebSocket, token: str):
             pass
         return
 
-    # out_q: game loop + error notices — drained only by pump_outgoing (single sender task).
-    # in_q: non-move client messages. move_q: latest move only (maxsize=1, replace on overflow)
-    # so ~60/s rAF move frames cannot build an unbounded asyncio.Queue backlog on the server.
+    # out_q: notices and non-tick payloads. tick_q: latest tick only (maxsize=1) so ~10/s game ticks
+    # cannot pile up in memory if send_json lags the browser (unbounded out_q caused 10–15s stalls).
+    # in_q: non-move client messages. move_q: latest move only (maxsize=1, replace on overflow).
     out_q: asyncio.Queue = asyncio.Queue()
+    tick_q: asyncio.Queue = asyncio.Queue(maxsize=1)
     in_q: asyncio.Queue = asyncio.Queue()
     move_q: asyncio.Queue = asyncio.Queue(maxsize=1)
 
@@ -112,7 +113,28 @@ async def websocket_endpoint(websocket: WebSocket, token: str):
     async def pump_outgoing():
         try:
             while True:
-                payload = await out_q.get()
+                try:
+                    payload = tick_q.get_nowait()
+                    await websocket.send_json(payload)
+                    continue
+                except asyncio.QueueEmpty:
+                    pass
+                t_tick = asyncio.create_task(tick_q.get())
+                t_out = asyncio.create_task(out_q.get())
+                done, pending = await asyncio.wait(
+                    {t_tick, t_out},
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                for p in pending:
+                    p.cancel()
+                    try:
+                        await p
+                    except asyncio.CancelledError:
+                        pass
+                if t_tick in done:
+                    payload = t_tick.result()
+                else:
+                    payload = t_out.result()
                 await websocket.send_json(payload)
         except asyncio.CancelledError:
             raise
@@ -137,7 +159,7 @@ async def websocket_endpoint(websocket: WebSocket, token: str):
             except Exception:
                 pass
 
-    engine.add_socket(player["id"], websocket, out_q)
+    engine.add_socket(player["id"], websocket, out_q, tick_q)
 
     try:
         while True:
