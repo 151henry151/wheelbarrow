@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.67] - 2026-04-16
+
+### Fixed
+- **Client** (`client/js/game.js`): **Show** **`[G]`** **construction** **hints** **when** **standing** **on** **or** **adjacent** **(Chebyshev** **≤** **1)** **to** **your** **active** **site** **using** **the** **same** **`_pick_adjacent_structure`** **rules** **as** **the** **server** **—** **matches** **`deposit_build`** **/** **`cancel_construction`** **so** **the** **HUD** **no** **longer** **requires** **standing** **exactly** **on** **the** **structure** **tile**
+
 ## [0.12.66] - 2026-04-19
 
 ### Fixed

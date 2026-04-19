@@ -153,6 +153,27 @@ function _playerTileXY(player) {
   return { tx: Math.floor(player.x), ty: Math.floor(player.y) };
 }
 
+/** Match server `Engine._pick_adjacent_structure` — prefer tile underfoot; else unique candidate within Chebyshev 1. */
+function _pickAdjacentStructure(ptx, pty, cands) {
+  if (!cands || !cands.length) return null;
+  const onTile = (n) => Math.floor(Number(n.x)) === ptx && Math.floor(Number(n.y)) === pty;
+  const on = cands.filter(onTile);
+  if (on.length === 1) return on[0];
+  if (cands.length === 1) return cands[0];
+  return null;
+}
+
+/** Active construction site the server uses for deposit/cancel (adjacent tiles + same pick as server). */
+function _constructionSiteForPlayer(tx, ty, playerId) {
+  const cands = state.nodes.filter((n) => {
+    if (!n.construction_active || n.owner_id !== playerId) return false;
+    const nx = Math.floor(Number(n.x));
+    const ny = Math.floor(Number(n.y));
+    return Math.max(Math.abs(tx - nx), Math.abs(ty - ny)) <= 1;
+  });
+  return _pickAdjacentStructure(tx, ty, cands);
+}
+
 /** Matches server free pile pickup (priced → owner only; on owner's land → owner only; else public). */
 function _canFreePickPile(pile, player) {
   if (pile.sell_price != null) return pile.owner_id === player.id;
@@ -536,9 +557,7 @@ function _updateHint() {
     }
   }
 
-  const siteHere = state.nodes.find(
-    n => n.construction_active && n.x === tx && n.y === ty && n.owner_id === p.id,
-  );
+  const siteHere = _constructionSiteForPlayer(tx, ty, p.id);
   if (siteHere) {
     if (total > 0) hints.push('[G] deliver barrow materials to this construction site');
     else hints.push('[G] deliver materials when your barrow has stone, wood, etc.');
