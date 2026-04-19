@@ -6,6 +6,10 @@ alwaysApply: false
 
 # Persist and `tick()`
 
-Full-world MariaDB persist **must not** run as a long inline block inside `tick()` only. That blocks asyncio for seconds → **no movement** / periodic freezes (see v0.12.71 regression, v0.12.73 fix `8b37e22`, original `39fe5d7`).
+Full-world MariaDB persist **must not** run as a long inline block inside `tick()` only. That blocks asyncio for seconds → **no movement** / periodic freezes aligned with **`persist_interval_s`**.
 
-Use **`asyncio.create_task(self._do_persist())`** with **`_persist_task`** guard. Details: **`docs/ENGINE-TICK-AND-PERSIST.md`**.
+Regressions: **v0.12.71** (removed background persist), fixed **v0.12.73** (`8b37e22`); **v0.12.76** chat merge (`e04ad31`) accidentally dropped **`_persist_task`** / **`_do_persist()`** again — fixed **v0.12.79** (`7c71ccf`). Original fix **`39fe5d7`**.
+
+**Required:** **`asyncio.create_task(self._do_persist())`** + **`_persist_task`** guard in **`tick()`** — never **`await queries.save_*`** directly in **`tick()`**.
+
+Misdiagnosis: WebSocket **`move_q`** starvation is separate (see **`main.py`**); if freezes match persist interval, fix persist first — **`docs/ENGINE-TICK-AND-PERSIST.md`**.

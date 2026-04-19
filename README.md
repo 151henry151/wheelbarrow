@@ -167,6 +167,8 @@ wheelbarrow/
 └── .env.example
 ```
 
+**Persistence:** Do not run full DB saves inline inside `GameEngine.tick()` — that blocks the asyncio loop and causes periodic movement freezes. Required pattern: `_persist_task` + `asyncio.create_task(self._do_persist())`. See **[`docs/ENGINE-TICK-AND-PERSIST.md`](docs/ENGINE-TICK-AND-PERSIST.md)** (regressions in v0.12.71 and v0.12.76, fixes in v0.12.73 and v0.12.79).
+
 ---
 
 ## Development Setup
@@ -196,4 +198,4 @@ See `wheelbarrow.service` for the service unit template. Deployment is handled m
 
 ## Version
 
-Current version: **0.12.79** (see `VERSION`, `pyproject.toml`, and cache-bust query on scripts in `client/index.html`). See [CHANGELOG.md](CHANGELOG.md).
+Current version: **0.10.4** (see `VERSION`, `pyproject.toml`, and cache-bust query on scripts in `client/index.html`). See [CHANGELOG.md](CHANGELOG.md).

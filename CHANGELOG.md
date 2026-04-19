@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.80] - 2026-04-19
+
+### Added
+- **Docs** (`docs/ENGINE-TICK-AND-PERSIST.md`): Document **v0.12.76** / **`e04ad31`** persist regression vs **WebSocket** starvation; **merge checklist**; history rows for **`7c71ccf`** (**v0.12.79**).
+- **README.md**: Link persistence rule and regression versions.
+- **Cursor** (`.cursor/rules/engine-tick-persist.mdc`): Note **v0.12.76** / **v0.12.79** and misdiagnosis vs **`move_q`**.
+
 ## [0.12.79] - 2026-04-19
 
 ### Added
