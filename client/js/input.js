@@ -14,6 +14,8 @@ const Input = (() => {
   let lastMoveSendTime = 0;
   /** While keys are held, re-send so a single dropped WebSocket message cannot zero input forever. */
   const MOVE_RESEND_MS = 33;
+  /** Cap steady-state move sends (~20/s) so the server is not fed 60/s identical frames. */
+  const MOVE_HOLD_MIN_MS = 50;
 
   const held = {};
 
@@ -95,13 +97,11 @@ const Input = (() => {
     turn = Math.max(-1, Math.min(1, turn));
 
     const msg = { type: 'move', fwd, turn };
-    // Camera-relative forward (W/S only): keep sending view-facing angle so server heading matches
-    // the orbit camera every frame. If we only sent face_angle once from rest, camera lerp + tick
-    // lag could desync angle from "into the screen"; movement then feels stuck until rest+orbit+W
-    // sends a fresh face_angle. Do not send while turn keys are held — those drive tank rotation.
+    // From a full stop, align barrow to orbit camera before driving (not tank-facing).
     const wasAtRest = lastFwdSample === 0;
     if (
       fwd !== 0
+      && wasAtRest
       && turn === 0
       && typeof Renderer !== 'undefined'
       && typeof Renderer.getCameraFacingAngle === 'function'
@@ -114,9 +114,10 @@ const Input = (() => {
     const t = (typeof now === 'number' && Number.isFinite(now)) ? now : performance.now();
     const sig = _moveSig(msg);
     const moving = fwd !== 0 || turn !== 0;
-    // While driving, send every frame so the server always sees fresh fwd/turn (dedupe + resend
-    // alone can leave _input_fwd stale if the event loop falls behind).
-    if (!moving) {
+    const sigChanged = sig !== lastSentMoveSig;
+    if (moving) {
+      if (!sigChanged && t - lastMoveSendTime < MOVE_HOLD_MIN_MS) return;
+    } else {
       const resendDue = t - lastMoveSendTime >= MOVE_RESEND_MS;
       if (sig === lastSentMoveSig && !resendDue) return;
     }

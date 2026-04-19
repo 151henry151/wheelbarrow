@@ -72,17 +72,33 @@ async def websocket_endpoint(websocket: WebSocket, token: str):
         return
 
     # out_q: game loop + error notices — drained only by pump_outgoing (single sender task).
-    # in_q: client messages — main loop handles_input without competing with tick delivery.
-    # Previously one task multiplexed send+recv with asyncio.wait and drain loops; continuous
-    # move traffic (~60/s) could starve outbound so ticks never reached the browser.
+    # in_q: non-move client messages. move_q: latest move only (maxsize=1, replace on overflow)
+    # so ~60/s rAF move frames cannot build an unbounded asyncio.Queue backlog on the server.
     out_q: asyncio.Queue = asyncio.Queue()
     in_q: asyncio.Queue = asyncio.Queue()
+    move_q: asyncio.Queue = asyncio.Queue(maxsize=1)
+
+    def _put_latest_move(msg: dict) -> None:
+        try:
+            move_q.put_nowait(msg)
+        except asyncio.QueueFull:
+            try:
+                move_q.get_nowait()
+            except asyncio.QueueEmpty:
+                pass
+            try:
+                move_q.put_nowait(msg)
+            except asyncio.QueueFull:
+                pass
 
     async def pump_incoming():
         try:
             while True:
                 msg = await websocket.receive_json()
-                await in_q.put(msg)
+                if msg.get("type") == "move":
+                    _put_latest_move(msg)
+                else:
+                    await in_q.put(msg)
         except WebSocketDisconnect:
             pass
         except Exception:
@@ -125,35 +141,25 @@ async def websocket_endpoint(websocket: WebSocket, token: str):
 
     try:
         while True:
-            msg = await in_q.get()
-            if msg is None:
-                break
-            # Coalesce consecutive `move` messages to the latest frame. At ~60 move frames/s
-            # the handler can fall behind the queue; processing stale moves before newer ones
-            # leaves _input_fwd briefly wrong and matches "stuck until next distinct input".
-            if msg.get("type") == "move":
-                disconnect = False
-                while True:
-                    try:
-                        m2 = in_q.get_nowait()
-                    except asyncio.QueueEmpty:
-                        break
-                    if m2 is None:
-                        await handle_input_safe(msg)
-                        disconnect = True
-                        break
-                    if m2.get("type") == "move":
-                        msg = m2
-                    else:
-                        await handle_input_safe(msg)
-                        await handle_input_safe(m2)
-                        msg = None
-                        break
-                if disconnect:
-                    break
-                if msg is not None:
-                    await handle_input_safe(msg)
+            t_move = asyncio.create_task(move_q.get())
+            t_in = asyncio.create_task(in_q.get())
+            done, pending = await asyncio.wait(
+                {t_move, t_in},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            for p in pending:
+                p.cancel()
+                try:
+                    await p
+                except asyncio.CancelledError:
+                    pass
+            if t_move in done:
+                msg = t_move.result()
+                await handle_input_safe(msg)
             else:
+                msg = t_in.result()
+                if msg is None:
+                    break
                 await handle_input_safe(msg)
             await asyncio.sleep(0)
     except WebSocketDisconnect:

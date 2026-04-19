@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.57] - 2026-04-18
+
+### Fixed
+- **Server** (`server/main.py`): **Route** **`move`** **frames** **through** **`asyncio.Queue(maxsize=1)`** **with** **replace-on-overflow** **—** **never** **enqueue** **unbounded** **`move`** **JSON** **on** **`in_q`** **(matches** **15–20s** **“queue** **drains** **after** **pause”** **behavior)**
+- **Client** (`client/js/input.js`): **Revert** **continuous** **`face_angle`** **(v0.12.56);** **throttle** **steady** **`fwd`/`turn`** **to** **≥** **50ms** **between** **sends** **when** **input** **unchanged** **(~20/s)** **;** **still** **send** **immediately** **when** **`fwd`/`turn`** **changes**
+
 ## [0.12.56] - 2026-04-18
 
 ### Fixed
