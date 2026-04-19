@@ -67,7 +67,8 @@ const Renderer = (() => {
   const DIST_MAX = 1600;
 
   let _camYaw = 0.55;
-  let _camPitch = 0.88;
+  /** Default pitch: low enough to keep horizon + a band of sky in frame (was ~0.88, too top-down). */
+  let _camPitch = 0.52;
   let _camDist = 380;
   let _dragging = false;
   let _lastPtrX = 0;
