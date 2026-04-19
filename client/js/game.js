@@ -174,6 +174,21 @@ function _constructionSiteForPlayer(tx, ty, playerId) {
   return _pickAdjacentStructure(tx, ty, cands);
 }
 
+/** Wild resource node within collection range (Chebyshev ≤ 1); prefer the tile underfoot if several apply. */
+function _wildResourceNodeForHud(tx, ty) {
+  const inRange = state.nodes.filter(
+    (n) => !n.is_structure
+      && Math.abs(n.x - tx) <= 1
+      && Math.abs(n.y - ty) <= 1
+      && (n.amount || 0) > 0,
+  );
+  if (!inRange.length) return null;
+  const onTile = inRange.find(
+    (n) => Math.floor(Number(n.x)) === tx && Math.floor(Number(n.y)) === ty,
+  );
+  return onTile || inRange[0];
+}
+
 /** Matches server free pile pickup (priced → owner only; on owner's land → owner only; else public). */
 function _canFreePickPile(pile, player) {
   if (pile.sell_price != null) return pile.owner_id === player.id;
@@ -615,8 +630,17 @@ function _updateHint() {
     }
   }
 
-  const near = state.nodes.find(n => !n.is_structure && Math.abs(n.x - tx) <= 1 && Math.abs(n.y - ty) <= 1 && n.amount > 0);
-  if (near) hints.push(`Collecting ${near.type}...`);
+  const near = _wildResourceNodeForHud(tx, ty);
+  if (near) {
+    const rem = Number(near.amount);
+    const mx = near.max != null ? Number(near.max) : 0;
+    const remStr = Number.isFinite(rem) ? rem.toFixed(1) : String(near.amount);
+    if (mx > 0 && Number.isFinite(mx)) {
+      hints.push(`Collecting ${near.type}… ${remStr} / ${mx.toFixed(1)} left in this node`);
+    } else {
+      hints.push(`Collecting ${near.type}… ${remStr} left in this node`);
+    }
+  }
 
   const isWinter = state.season && state.season.name === 'winter';
   const crop = state.crops.find(c => c.x === tx && c.y === ty);

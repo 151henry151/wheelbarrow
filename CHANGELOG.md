@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.68] - 2026-04-19
+
+### Changed
+- **Client** (`client/js/game.js`): **Show** **remaining** **resource** **amount** **(and** **max** **when** **available)** **in** **the** **HUD** **while** **collecting** **from** **a** **wild** **node;** **prefer** **the** **node** **on** **the** **tile** **underfoot** **when** **multiple** **nodes** **are** **in** **range**
+
 ## [0.12.67] - 2026-04-16
 
 ### Fixed
