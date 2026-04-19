@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.73] - 2026-04-19
+
+### Fixed
+- **Server** (`server/game/engine.py`): Restore background-task persist — `_do_persist()` runs via `asyncio.create_task` so the event loop is never blocked during DB saves, preventing periodic movement freezes that recurred every persist cycle after the fix was accidentally reverted in v0.12.71.
+
 ## [0.12.72] - 2026-04-19
 
 ### Fixed

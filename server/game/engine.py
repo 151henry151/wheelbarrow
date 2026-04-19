@@ -189,6 +189,7 @@ class GameEngine:
         self._last_persist       = time.monotonic()
         self._last_market_drift  = time.monotonic()
         self._last_election_check = time.monotonic()
+        self._persist_task: asyncio.Task | None = None
         # Cached tile set for movement collision; invalidate when structures/piles change.
         self._movement_blocked_cache: set[tuple[int, int]] | None = None
         # Wild nodes are static after load — chunk id -> list of node ids for viewport culling.
@@ -2186,15 +2187,25 @@ class GameEngine:
 
         if now - self._last_persist >= persist_interval_s:
             self._last_persist = now
-            for p in self.players.values():
+            if self._persist_task is None or self._persist_task.done():
+                self._persist_task = asyncio.create_task(self._do_persist())
+            else:
+                logging.warning("wheelbarrow: skipping persist — previous persist still running")
+
+    async def _do_persist(self):
+        """Persist all live state to DB. Runs as a background task to avoid stalling tick()."""
+        try:
+            for p in list(self.players.values()):
                 if p["id"] in self.sockets:
                     await queries.save_player(p)
-            for n in self.nodes.values():
+            for n in list(self.nodes.values()):
                 await queries.save_node(n)
-            for s in self.structures.values():
+            for s in list(self.structures.values()):
                 await queries.save_structure(s)
-            for t in self.towns.values():
+            for t in list(self.towns.values()):
                 await queries.update_town(t)
+        except Exception:
+            logging.exception("wheelbarrow: _do_persist failed")
 
     async def _do_resource_tick(self, elapsed: float):
         all_nodes = {**self.nodes, **self.structures}
