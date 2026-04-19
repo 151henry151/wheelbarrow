@@ -150,6 +150,7 @@ CREATE TABLE IF NOT EXISTS crops (
     crop_type     VARCHAR(32) NOT NULL DEFAULT 'wheat',
     planted_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     fertilized_at DATETIME DEFAULT NULL,
+    fertilizer_type VARCHAR(16) DEFAULT NULL,
     ready_at      DATETIME NOT NULL,
     harvested     TINYINT DEFAULT 0,
     winter_dead   TINYINT NOT NULL DEFAULT 0,

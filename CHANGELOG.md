@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.81] - 2026-04-19
+
+### Changed
+- **Wheat** (`server/game/constants.py`, `server/game/engine.py`): Set harvest **yield** from **fertilizer type** — **5** / **6** / **8** / **10** units for none / manure / compost / store fertilizer (`_crop_harvest_yield`, `crops.fertilizer_type`).
+- **Seed shop** (`constants.py`, `client/js/game.js`, `client/index.html`): Store fertilizer **×5** costs **150** coins.
+- **NPC market** (`constants.py`, `server/game/engine.py`, `server/db/queries.py`): Remove **fertilizer** from **`MARKET_BASE_PRICES`** and from NPC sell liquidation; migration deletes **`market_prices`** row for fertilizer.
+
+### Added
+- **Schema** (`db/init.sql`, `server/db/queries.py`, `server/game/engine.py`): **`crops.fertilizer_type`**; **`fertilize_crop`** records type; legacy **`fertilized_at`** rows without type use **compost-tier** yield (**8**).
+
 ## [0.12.80] - 2026-04-19
 
 ### Added

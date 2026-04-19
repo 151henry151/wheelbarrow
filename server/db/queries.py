@@ -657,6 +657,21 @@ async def ensure_crop_winter_dead_column():
                 )
 
 
+async def ensure_crop_fertilizer_type_column():
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """SELECT COUNT(*) FROM information_schema.COLUMNS
+                   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'crops' AND COLUMN_NAME = 'fertilizer_type'""",
+            )
+            (n,) = await cur.fetchone()
+            if n == 0:
+                await cur.execute(
+                    "ALTER TABLE crops ADD COLUMN fertilizer_type VARCHAR(16) NULL DEFAULT NULL",
+                )
+
+
 async def ensure_soil_tiles_table():
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -720,13 +735,13 @@ async def create_crop(parcel_id, owner_id, x, y, crop_type, ready_at_dt) -> dict
             return await cur.fetchone()
 
 
-async def fertilize_crop(crop_id, new_ready_at_dt):
+async def fertilize_crop(crop_id, new_ready_at_dt, fertilizer_type: str):
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
-                "UPDATE crops SET fertilized_at=NOW(), ready_at=%s WHERE id=%s",
-                (new_ready_at_dt, crop_id),
+                "UPDATE crops SET fertilized_at=NOW(), ready_at=%s, fertilizer_type=%s WHERE id=%s",
+                (new_ready_at_dt, fertilizer_type, crop_id),
             )
 
 
@@ -794,6 +809,14 @@ async def ensure_market_price_rows(defaults: dict[str, float]):
                     "INSERT INTO market_prices (resource_type, price_per_unit) VALUES (%s, %s)",
                     (rtype, price),
                 )
+
+
+async def delete_market_price_row(resource_type: str):
+    """Remove NPC market pricing for a resource (e.g. fertilizer — seed shop only)."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("DELETE FROM market_prices WHERE resource_type=%s", (resource_type,))
 
 
 async def get_market_prices() -> dict[str, float]:

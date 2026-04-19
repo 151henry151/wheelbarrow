@@ -37,7 +37,7 @@ const STRUCT_KEYS = Object.keys(STRUCTURE_DEFS);
 
 const SEED_SHOP = {
   wheat_seed: { label: 'Wheat Seeds ×10', cost: 25 },
-  fertilizer: { label: 'Fertilizer ×5',  cost: 50 },
+  fertilizer: { label: 'Fertilizer ×5',  cost: 150 },
 };
 const REPAIR_OPTIONS = [
   { key: 'paint',  label: 'Repair Paint  (30c per 10%)' },
@@ -657,7 +657,10 @@ function updateHud() {
   const nearPlayerMarket = state.nodes.some(n => n.is_market && Math.abs(n.x - mtx) <= 1 && Math.abs(n.y - mty) <= 1);
   if (nearNpcMarket || nearPlayerMarket) {
     document.getElementById('hud-prices').textContent =
-      Object.entries(state.prices).map(([k,v]) => `${k[0].toUpperCase()}${k.slice(1)}: ${v}c`).join('  ');
+      Object.entries(state.prices)
+        .filter(([k]) => k !== 'fertilizer')
+        .map(([k, v]) => `${k[0].toUpperCase()}${k.slice(1)}: ${v}c`)
+        .join('  ');
   } else {
     document.getElementById('hud-prices').textContent = '';
   }
@@ -833,7 +836,7 @@ function _updateHint() {
         : '[F] till — clear frosted crop');
     } else {
       hints.push(crop.ready ? '[F] harvest crop'
-        : '[F] fertilize (fertilizer, compost, or manure in barrow) / check crop');
+        : '[F] fertilize — manure 6 / compost 8 / store fertilizer 10 wheat; unfertilized 5; or check crop');
     }
   } else if (parcel && parcel.owner_id === p.id) {
     if (pilesHere.length) {

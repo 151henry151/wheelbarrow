@@ -127,8 +127,8 @@ NPC_SHOP_ADJACENCY = 1
 
 SEED_SHOP_ITEMS = {
     "wheat_seed": {"label": "Wheat Seeds ×10", "cost": 25, "qty": 10},
-    # ~2× manure NPC buy price per unit (manure 5c → 10c/unit → 5 units = 50c)
-    "fertilizer": {"label": "Fertilizer ×5",   "cost": 50, "qty": 5},
+    # Store-bought fertilizer: not sold back at NPC market; higher cost vs manure/compost yields
+    "fertilizer": {"label": "Fertilizer ×5",   "cost": 150, "qty": 5},
 }
 
 # ---- Farming ----------------------------------------------------------------
@@ -139,8 +139,11 @@ CROP_DEFS = {
         "grow_time_s":        20 * 60,
         "grow_time_fert_s":   10 * 60,
         "fertilize_window_s": 10 * 60,
-        "yield_base":         8,
-        "yield_fertilized":   16,
+        # Harvest wheat units per tile (see _crop_harvest_yield)
+        "yield_unfertilized": 5,
+        "yield_manure":       6,
+        "yield_compost":      8,
+        "yield_fertilizer":   10,
         "plant_season":       0,
         "harvest_season":     2,
     }
@@ -271,10 +274,11 @@ DEMOLISH_REFUND_RATE = {
 }
 
 # ---- Market -----------------------------------------------------------------
+# NPC market buy prices (player sells to NPC). Fertilizer is seed-shop only — not listed here.
 MARKET_BASE_PRICES = {
     "manure": 5.0, "gravel": 3.0, "topsoil": 3.0, "compost": 4.0,
     "wood":   3.0, "stone":  4.0, "clay":   2.5,  "dirt":    1.0,
-    "wheat":  5.0, "fertilizer": 12.0,
+    "wheat":  5.0,
 }
 MARKET_DRIFT_INTERVAL  = 60
 MARKET_DRIFT_THRESHOLD = 50

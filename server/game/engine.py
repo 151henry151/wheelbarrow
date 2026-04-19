@@ -73,6 +73,19 @@ def _pile_collect_key(tx: int, ty: int, rtype: str) -> str:
     return f"{tx},{ty},{rtype}"
 
 
+def _crop_harvest_yield(crop: dict, cdef: dict) -> float:
+    """Wheat units at harvest; `fertilizer_type` is set when fertilizing (manure / compost / fertilizer)."""
+    if not crop.get("fertilized_at"):
+        return float(cdef["yield_unfertilized"])
+    ft = crop.get("fertilizer_type")
+    if not ft:
+        return float(cdef["yield_compost"])
+    key = f"yield_{ft}"
+    if key in cdef:
+        return float(cdef[key])
+    return float(cdef["yield_compost"])
+
+
 def _migrate_pocket_fertilizer_to_bucket(player: dict) -> None:
     """Fertilizer is carried in the wheelbarrow; move legacy pocket stock into the bucket."""
     pocket = player.setdefault("pocket", {})
@@ -190,7 +203,6 @@ class GameEngine:
         self._last_persist       = time.monotonic()
         self._last_market_drift  = time.monotonic()
         self._last_election_check = time.monotonic()
-        self._persist_task: asyncio.Task | None = None
         # Cached tile set for movement collision; invalidate when structures/piles change.
         self._movement_blocked_cache: set[tuple[int, int]] | None = None
         # Wild nodes are static after load — chunk id -> list of node ids for viewport culling.
@@ -252,6 +264,7 @@ class GameEngine:
         self._rebuild_pile_chunk_index()
         self._rebuild_wild_node_chunk_index()
         await queries.ensure_crop_winter_dead_column()
+        await queries.ensure_crop_fertilizer_type_column()
         await queries.ensure_soil_tiles_table()
         await queries.cleanup_legacy_harvested_crop_rows()
         for row in await queries.load_all_soil_tiles():
@@ -297,7 +310,9 @@ class GameEngine:
         await self._ensure_intratown_npc_road_paths()
 
         await queries.ensure_market_price_rows(MARKET_BASE_PRICES)
-        self.prices = await queries.get_market_prices()
+        await queries.delete_market_price_row("fertilizer")
+        raw_prices = await queries.get_market_prices()
+        self.prices = {k: float(v) for k, v in raw_prices.items() if k in MARKET_BASE_PRICES}
         for rtype, base in MARKET_BASE_PRICES.items():
             if rtype not in self.prices:
                 self.prices[rtype] = base
@@ -992,12 +1007,16 @@ class GameEngine:
         if not bucket:
             return
         earned = 0.0
+        new_bucket: dict = {}
         for rtype, amount in bucket.items():
+            if rtype not in MARKET_BASE_PRICES:
+                new_bucket[rtype] = amount
+                continue
             price = self.prices.get(rtype, 0)
             earned += amount * price
             self.sales_volume[rtype] = self.sales_volume.get(rtype, 0) + amount
         player["coins"] += int(earned)
-        player["bucket"] = {}
+        player["bucket"] = new_bucket
         await self._send(player_id, {"type": "sold", "earned": int(earned), "coins": player["coins"]})
 
     # ---- buy parcel ---------------------------------------------------------
@@ -1818,7 +1837,7 @@ class GameEngine:
                     await self._send(player_id, {"type": "notice", "msg": "Not your land."})
                     return
                 cdef = CROP_DEFS.get(crop["crop_type"], CROP_DEFS["wheat"])
-                qty  = cdef["yield_fertilized"] if crop.get("fertilized_at") else cdef["yield_base"]
+                qty  = _crop_harvest_yield(crop, cdef)
                 space = effective_bucket_cap(player) - _bucket_total(player.get("bucket", {}))
                 take  = min(qty, space)
                 if take <= 0:
@@ -1877,8 +1896,9 @@ class GameEngine:
                         src = "manure"
                     new_ready = now_utc + datetime.timedelta(seconds=cdef["grow_time_fert_s"] - elapsed)
                     crop["fertilized_at"] = now_utc.isoformat()
+                    crop["fertilizer_type"] = src
                     crop["ready_at"]      = new_ready
-                    await queries.fertilize_crop(crop["id"], new_ready)
+                    await queries.fertilize_crop(crop["id"], new_ready, src)
                     if src == "fertilizer":
                         note = "Fertilized! Crop grows faster."
                     elif src == "compost":
@@ -2220,25 +2240,15 @@ class GameEngine:
 
         if now - self._last_persist >= persist_interval_s:
             self._last_persist = now
-            if self._persist_task is None or self._persist_task.done():
-                self._persist_task = asyncio.create_task(self._do_persist())
-            else:
-                logging.warning("wheelbarrow: skipping persist — previous persist still running")
-
-    async def _do_persist(self):
-        """Persist all live state to DB. Runs as a background task to avoid stalling tick()."""
-        try:
-            for p in list(self.players.values()):
+            for p in self.players.values():
                 if p["id"] in self.sockets:
                     await queries.save_player(p)
-            for n in list(self.nodes.values()):
+            for n in self.nodes.values():
                 await queries.save_node(n)
-            for s in list(self.structures.values()):
+            for s in self.structures.values():
                 await queries.save_structure(s)
-            for t in list(self.towns.values()):
+            for t in self.towns.values():
                 await queries.update_town(t)
-        except Exception:
-            logging.exception("wheelbarrow: _do_persist failed")
 
     async def _do_resource_tick(self, elapsed: float):
         all_nodes = {**self.nodes, **self.structures}
@@ -2629,6 +2639,7 @@ class GameEngine:
             "owner_id":    c["owner_id"],
             "ready":       (not wd) and (ready_at <= now),
             "fertilized":  (not wd) and (c.get("fertilized_at") is not None),
+            "fertilizer_type": c.get("fertilizer_type"),
             "winter_dead": wd,
         }
 
