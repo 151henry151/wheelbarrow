@@ -60,7 +60,7 @@ const Input = (() => {
         return;
       }
       e.preventDefault();
-      onKey && onKey(e.key);
+      onKey && onKey(e.key, e.repeat);
     });
     window.addEventListener('keyup', e => {
       if (_isMoveKey(e.key, e.code)) {
@@ -162,9 +162,14 @@ const Input = (() => {
     );
   }
 
-  /** A/D or left/right — snap follow camera to barrow while steering. */
+  /** True while steering keys held — camera snaps to barrow heading instead of lerping (see renderer). */
   function isTurnKeyHeld() {
-    return !!(held.ArrowLeft || held.ArrowRight || held.a || held.d);
+    return !!(
+      held.ArrowLeft
+      || held.ArrowRight
+      || held.a
+      || held.d
+    );
   }
 
   return { init, update, setAutopilotBlocked, clearHeldKeys, isWheelbarrowControlActive, isTurnKeyHeld };

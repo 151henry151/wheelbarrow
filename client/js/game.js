@@ -1032,7 +1032,7 @@ function toggleHud() {
 }
 
 // --------------------------------------------------------------- key handler
-function handleKey(key) {
+function handleKey(key, isRepeat) {
   if (state.sellAutopilotActive && key.toLowerCase() === 'h') {
     toggleHud();
     return;
@@ -1149,10 +1149,12 @@ function handleKey(key) {
   // ---- Normal keys ----
   const lk = key.toLowerCase();
   if (lk === 'v') {
+    if (isRepeat) return;
     WS.send({ type: 'stop_collect' });
     return;
   }
   if (/^[1-9]$/.test(key)) {
+    if (isRepeat) return;
     const cands = _collectLoadCandidates();
     const idx = parseInt(key, 10) - 1;
     const c = cands[idx];

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.72] - 2026-04-19
+
+### Fixed
+- **Server** (`server/main.py`): **Apply** **queued** **`move`** **input** **with** **`get_nowait()`** **before** **each** **`wait(move_q,` **`in_q)`** **—** **prevents** **non-move** **WebSocket** **messages** **(e.g.** **`start_collect`** **key** **repeat)** **from** **starving** **`handle_input`** **for** **`move`** **(wheelbarrow** **stuck** **not** **moving)**
+- **Client** (`client/js/input.js`, `client/js/game.js`): **Ignore** **key** **repeat** **for** **`[V]`** **stop** **load** **and** **`[1]`–`[9]`** **start** **load** **—** **fewer** **redundant** **`start_collect`** **messages**
+
 ## [0.12.71] - 2026-04-19
 
 ### Changed

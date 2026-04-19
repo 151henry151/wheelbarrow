@@ -163,6 +163,16 @@ async def websocket_endpoint(websocket: WebSocket, token: str):
 
     try:
         while True:
+            # Apply any already-queued move before competing with in_q. Otherwise a burst of
+            # non-move messages (e.g. start_collect key repeat) can win FIRST_COMPLETED every
+            # time and starve movement integration — wheelbarrow appears stuck.
+            try:
+                msg = move_q.get_nowait()
+                await handle_input_safe(msg)
+                await asyncio.sleep(0)
+            except asyncio.QueueEmpty:
+                pass
+
             t_move = asyncio.create_task(move_q.get())
             t_in = asyncio.create_task(in_q.get())
             done, pending = await asyncio.wait(
