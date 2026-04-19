@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.61] - 2026-04-18
+
+### Changed
+- **Server** (`server/game/world_gen.py`): Restore dense world-gen parameters that were reduced as a (mistaken) attempt to fix the movement freeze — forest cluster target back to 880 (from 92), cluster min spacing 8 (from 13), grid step 10 (from 25), grid hit probability 0.48 (from 0.35), meadow copse target 200 (from 0), forest biome threshold widened to 40% of the map, mineral cross-biome sprinkle (`MINERAL_QUAD`) restored, and boost multiplier back to 2.1× (from 1.5×).
+
 ## [0.12.60] - 2026-04-18
 
 ### Fixed
