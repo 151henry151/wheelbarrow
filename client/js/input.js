@@ -162,15 +162,5 @@ const Input = (() => {
     );
   }
 
-  /** True while steering keys held — camera snaps to barrow heading instead of lerping (see renderer). */
-  function isTurnKeyHeld() {
-    return !!(
-      held.ArrowLeft
-      || held.ArrowRight
-      || held.a
-      || held.d
-    );
-  }
-
-  return { init, update, setAutopilotBlocked, clearHeldKeys, isWheelbarrowControlActive, isTurnKeyHeld };
+  return { init, update, setAutopilotBlocked, clearHeldKeys, isWheelbarrowControlActive };
 })();
