@@ -1273,9 +1273,6 @@ ${sdRoundBoxFn}`,
       const gy = _groundY(node.x, node.y);
       grp.position.set(x, gy, z);
       grp.visible = true;
-      if (node.owner_name && (node.is_structure || node.is_market)) {
-        _spriteText(node.owner_name, x, gy + 48, z, 0xccffaa, false);
-      }
     }
     _hideNodePool();
   }

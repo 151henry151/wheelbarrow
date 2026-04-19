@@ -174,19 +174,78 @@ function _constructionSiteForPlayer(tx, ty, playerId) {
   return _pickAdjacentStructure(tx, ty, cands);
 }
 
-/** Wild resource node within collection range (Chebyshev ≤ 1); prefer the tile underfoot if several apply. */
-function _wildResourceNodeForHud(tx, ty) {
-  const inRange = state.nodes.filter(
-    (n) => !n.is_structure
-      && Math.abs(n.x - tx) <= 1
-      && Math.abs(n.y - ty) <= 1
-      && (n.amount || 0) > 0,
-  );
-  if (!inRange.length) return null;
-  const onTile = inRange.find(
-    (n) => Math.floor(Number(n.x)) === tx && Math.floor(Number(n.y)) === ty,
-  );
-  return onTile || inRange[0];
+/** Chebyshev distance on integer tiles (matches server COLLECTION_RADIUS = 1). */
+function _chebTile(ax, ay, bx, by) {
+  return Math.max(Math.abs(ax - bx), Math.abs(ay - by));
+}
+
+/**
+ * Wild nodes and free piles within Chebyshev ≤1 of the player tile that can be loaded (explicit [1]–[9]).
+ * Sorted by distance then label; max 9 entries.
+ */
+function _collectLoadCandidates() {
+  const p = state.player;
+  if (!p) return [];
+  const { tx, ty } = _playerTileXY(p);
+  const cap = effectiveBucketCap(p);
+  const load = Object.values(p.bucket || {}).reduce((a, b) => a + b, 0);
+  if (load >= cap - 1e-6) return [];
+
+  const seen = new Set();
+  const out = [];
+
+  for (const n of state.nodes || []) {
+    if (n.construction_active) continue;
+    if (n.is_market || n.is_town_hall) continue;
+    const nx = Math.floor(Number(n.x));
+    const ny = Math.floor(Number(n.y));
+    if (_chebTile(tx, ty, nx, ny) > 1) continue;
+    if ((n.amount || 0) <= 0) continue;
+    const k = `wild:${n.id}`;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push({
+      kind: 'wild',
+      nodeId: n.id,
+      label: n.type || 'resource',
+      d: _chebTile(tx, ty, nx, ny),
+      nx,
+      ny,
+    });
+  }
+
+  for (let dx = -1; dx <= 1; dx++) {
+    for (let dy = -1; dy <= 1; dy++) {
+      const px = tx + dx;
+      const py = ty + dy;
+      const pilesHere = (state.piles || []).filter(
+        pl => pl.x === px && pl.y === py && pl.amount > 0,
+      );
+      for (const pl of pilesHere) {
+        if (!_canFreePickPile(pl, p)) continue;
+        const pk = `pile:${px},${py},${pl.resource_type}`;
+        if (seen.has(pk)) continue;
+        seen.add(pk);
+        out.push({
+          kind: 'pile',
+          x: px,
+          y: py,
+          rtype: pl.resource_type,
+          label: pl.resource_type,
+          d: _chebTile(tx, ty, px, py),
+        });
+      }
+    }
+  }
+
+  out.sort((a, b) => (
+    a.d - b.d
+    || String(a.label).localeCompare(String(b.label))
+    || ((a.nodeId || 0) - (b.nodeId || 0))
+    || ((a.x || 0) - (b.x || 0))
+    || String(a.rtype || '').localeCompare(String(b.rtype || ''))
+  ));
+  return out.slice(0, 9);
 }
 
 /** Matches server free pile pickup (priced → owner only; on owner's land → owner only; else public). */
@@ -337,8 +396,13 @@ async function _autopilotMoveToTile(tx, ty) {
  * or done (pile and bucket empty).
  */
 async function _waitLoadPhase(rtype, hx, hy) {
+  let started = false;
   while (state.sellAutopilotActive) {
     if (Math.floor(state.player.x) !== hx || Math.floor(state.player.y) !== hy) {
+      if (started && typeof WS !== 'undefined' && WS.send) {
+        WS.send({ type: 'stop_collect' });
+        started = false;
+      }
       await _autopilotMoveToTile(hx, hy);
       continue;
     }
@@ -346,11 +410,31 @@ async function _waitLoadPhase(rtype, hx, hy) {
     const pa = pile ? pile.amount : 0;
     const ld = _bucketTotalPlayer(state.player);
     const cap = effectiveBucketCap(state.player);
-    if (pa <= 0 && ld <= 0) return 'done';
-    if (ld >= cap - 0.06) return 'sell';
-    if (pa <= 0 && ld > 0) return 'sell';
+    if (pa <= 0 && ld <= 0) {
+      if (started && typeof WS !== 'undefined' && WS.send) WS.send({ type: 'stop_collect' });
+      return 'done';
+    }
+    if (ld >= cap - 0.06) {
+      if (started && typeof WS !== 'undefined' && WS.send) WS.send({ type: 'stop_collect' });
+      return 'sell';
+    }
+    if (pa <= 0 && ld > 0) {
+      if (started && typeof WS !== 'undefined' && WS.send) WS.send({ type: 'stop_collect' });
+      return 'sell';
+    }
+    if (pa > 0 && ld < cap - 0.06 && !started && typeof WS !== 'undefined' && WS.send) {
+      WS.send({
+        type: 'start_collect',
+        target: 'pile',
+        x: hx,
+        y: hy,
+        resource_type: rtype,
+      });
+      started = true;
+    }
     await waitNextTick();
   }
+  if (started && typeof WS !== 'undefined' && WS.send) WS.send({ type: 'stop_collect' });
   return 'abort';
 }
 
@@ -627,24 +711,48 @@ function _updateHint() {
     const otherPiles = pilesHere.filter(p2 => p2.owner_id !== p.id && p2.sell_price != null);
     if (ownPiles.length)   hints.push('[E] manage pile prices');
     if (otherPiles.length) hints.push('[E] buy from pile');
-    const pick = pilesHere.find(pl => _canFreePickPile(pl, p) && pl.amount > 0);
-    if (pick) {
-      const cap  = effectiveBucketCap(p);
-      const load = Object.values(p.bucket || {}).reduce((a, b) => a + b, 0);
-      if (load < cap) hints.push(`Loading ${pick.resource_type} from pile…`);
-    }
   }
 
-  const near = _wildResourceNodeForHud(tx, ty);
-  if (near) {
-    const rem = Number(near.amount);
-    const mx = near.max != null ? Number(near.max) : 0;
-    const remStr = Number.isFinite(rem) ? rem.toFixed(1) : String(near.amount);
-    if (mx > 0 && Number.isFinite(mx)) {
-      hints.push(`Collecting ${near.type}… ${remStr} / ${mx.toFixed(1)} left in this node`);
+  const capLoad = effectiveBucketCap(p);
+  const loadTot = Object.values(p.bucket || {}).reduce((a, b) => a + b, 0);
+  const isCollecting = p.collecting_node_id != null
+    || (p.collecting_pile_key != null && String(p.collecting_pile_key).length > 0);
+
+  if (isCollecting) {
+    if (p.collecting_pile_key) {
+      const parts = String(p.collecting_pile_key).split(',');
+      if (parts.length === 3) {
+        hints.push(`Loading ${parts[2]} from pile… stay within 1 tile ([V] stop)`);
+      } else {
+        hints.push('Loading from pile… stay within 1 tile ([V] stop)');
+      }
     } else {
-      hints.push(`Collecting ${near.type}… ${remStr} left in this node`);
+      const active = state.nodes.find(
+        n => n.id === p.collecting_node_id || String(n.id) === String(p.collecting_node_id),
+      );
+      if (active) {
+        const rem = Number(active.amount);
+        const mx = active.max != null ? Number(active.max) : 0;
+        const remStr = Number.isFinite(rem) ? rem.toFixed(1) : String(active.amount);
+        if (mx > 0 && Number.isFinite(mx)) {
+          hints.push(`Loading ${active.type}… ${remStr} / ${mx.toFixed(1)} left ([V] stop)`);
+        } else {
+          hints.push(`Loading ${active.type}… ${remStr} left in node ([V] stop)`);
+        }
+      } else {
+        hints.push('Loading… stay within 1 tile ([V] stop)');
+      }
     }
+  } else if (loadTot < capLoad) {
+    const cands = _collectLoadCandidates();
+    cands.forEach((c, i) => {
+      const num = i + 1;
+      if (c.kind === 'wild') {
+        hints.push(`[${num}] load ${c.label} at tile ${c.nx},${c.ny} (wild)`);
+      } else {
+        hints.push(`[${num}] load ${c.label} from pile at ${c.x},${c.y}`);
+      }
+    });
   }
 
   const isWinter = state.season && state.season.name === 'winter';
@@ -1040,6 +1148,29 @@ function handleKey(key) {
 
   // ---- Normal keys ----
   const lk = key.toLowerCase();
+  if (lk === 'v') {
+    WS.send({ type: 'stop_collect' });
+    return;
+  }
+  if (/^[1-9]$/.test(key)) {
+    const cands = _collectLoadCandidates();
+    const idx = parseInt(key, 10) - 1;
+    const c = cands[idx];
+    if (c) {
+      if (c.kind === 'wild') {
+        WS.send({ type: 'start_collect', target: 'wild', node_id: c.nodeId });
+      } else {
+        WS.send({
+          type: 'start_collect',
+          target: 'pile',
+          x: c.x,
+          y: c.y,
+          resource_type: c.rtype,
+        });
+      }
+    }
+    return;
+  }
   if (lk === 'h')  { toggleHud(); return; }
   if (key === ' ') { WS.send({ type: 'sell' }); return; }
   if (lk === 'b')  { _handleBuyParcel(); return; }

@@ -69,6 +69,10 @@ def _bucket_total(bucket: dict) -> float:
     return sum(bucket.values())
 
 
+def _pile_collect_key(tx: int, ty: int, rtype: str) -> str:
+    return f"{tx},{ty},{rtype}"
+
+
 def _migrate_pocket_fertilizer_to_bucket(player: dict) -> None:
     """Fertilizer is carried in the wheelbarrow; move legacy pocket stock into the bucket."""
     pocket = player.setdefault("pocket", {})
@@ -185,8 +189,6 @@ class GameEngine:
         self._last_persist       = time.monotonic()
         self._last_market_drift  = time.monotonic()
         self._last_election_check = time.monotonic()
-        # Persist runs as a background task so tick() returns quickly for movement integration.
-        self._persist_task: asyncio.Task | None = None
         # Cached tile set for movement collision; invalidate when structures/piles change.
         self._movement_blocked_cache: set[tuple[int, int]] | None = None
         # Wild nodes are static after load — chunk id -> list of node ids for viewport culling.
@@ -363,10 +365,6 @@ class GameEngine:
                 v = d.get(k)
                 if v and len(v) >= 2:
                     sites.append((int(v[0]), int(v[1])))
-            # Include town center so intra-town paths connect to inter-town roads
-            tc = (int(town.get("center_x", 0)), int(town.get("center_y", 0)))
-            if tc != (0, 0) and tc not in sites:
-                sites.append(tc)
             if len(sites) < 2:
                 continue
             desired |= path_union_for_sites(poly, sites, set())
@@ -777,6 +775,102 @@ class GameEngine:
         if player:
             await queries.save_player(player)
 
+    def _refresh_collecting_state(self, player: dict, ptx: int, pty: int, all_nodes: dict) -> None:
+        """Clear collecting targets when bucket is full, out of range, or source is empty."""
+        cap = effective_bucket_cap(player)
+        if _bucket_total(player.get("bucket", {})) >= cap - 1e-6:
+            player["_collecting_node_id"] = None
+            player["_collecting_pile_key"] = None
+            return
+
+        nid = player.get("_collecting_node_id")
+        if nid is not None:
+            node = all_nodes.get(nid)
+            if not node:
+                player["_collecting_node_id"] = None
+            else:
+                ntx, nty = int(node["x"]), int(node["y"])
+                if max(abs(ptx - ntx), abs(pty - nty)) > COLLECTION_RADIUS:
+                    player["_collecting_node_id"] = None
+                elif float(node.get("current_amount", 0) or 0) <= 0:
+                    player["_collecting_node_id"] = None
+
+        pk = player.get("_collecting_pile_key")
+        if pk:
+            parts = pk.split(",")
+            if len(parts) != 3:
+                player["_collecting_pile_key"] = None
+            else:
+                tx, ty, rt = int(parts[0]), int(parts[1]), parts[2]
+                if max(abs(ptx - tx), abs(pty - ty)) > COLLECTION_RADIUS:
+                    player["_collecting_pile_key"] = None
+                else:
+                    has_pending = any(
+                        int(p["x"]) == tx and int(p["y"]) == ty and p["rtype"] == rt
+                        for p in (player.get("_pending_pile_loads") or [])
+                    )
+                    pm = self.piles.get((tx, ty), {}).get(rt)
+                    if not has_pending and (not pm or float(pm.get("amount", 0) or 0) <= 0):
+                        player["_collecting_pile_key"] = None
+
+    async def _stop_collect(self, player_id: int) -> None:
+        pl = self.players.get(player_id)
+        if pl:
+            pl["_collecting_node_id"] = None
+            pl["_collecting_pile_key"] = None
+
+    async def _start_collect(self, player_id: int, msg: dict) -> None:
+        pl = self.players.get(player_id)
+        if not pl:
+            return
+        target = msg.get("target")
+        ptx, pty = player_tile_xy(pl)
+        all_nodes = {**self.nodes, **self.structures}
+        if target == "wild":
+            try:
+                nid = int(msg.get("node_id"))
+            except (TypeError, ValueError):
+                return
+            node = all_nodes.get(nid)
+            if not node:
+                await self._send(player_id, {"type": "notice", "msg": "That resource is not here."})
+                return
+            if node.get("construction_active") or node.get("is_market") or node.get("is_town_hall"):
+                return
+            ntx, nty = int(node["x"]), int(node["y"])
+            if max(abs(ptx - ntx), abs(pty - nty)) > COLLECTION_RADIUS:
+                await self._send(player_id, {"type": "notice", "msg": "Move closer to load."})
+                return
+            if float(node.get("current_amount", 0) or 0) <= 0:
+                await self._send(player_id, {"type": "notice", "msg": "Nothing left to collect."})
+                return
+            pl["_collecting_node_id"] = nid
+            pl["_collecting_pile_key"] = None
+        elif target == "pile":
+            try:
+                tx = int(msg["x"])
+                ty = int(msg["y"])
+                rtype = str(msg.get("resource_type") or "")
+            except (TypeError, ValueError, KeyError):
+                return
+            if not rtype:
+                return
+            pile_map = self.piles.get((tx, ty))
+            pile = pile_map.get(rtype) if pile_map else None
+            if not pile or float(pile.get("amount", 0) or 0) <= 0:
+                await self._send(player_id, {"type": "notice", "msg": "No pile there."})
+                return
+            if not self._player_can_free_pick_pile(pl, pile):
+                await self._send(player_id, {"type": "notice", "msg": "You cannot load from that pile."})
+                return
+            if max(abs(ptx - tx), abs(pty - ty)) > COLLECTION_RADIUS:
+                await self._send(player_id, {"type": "notice", "msg": "Move closer to load."})
+                return
+            pl["_collecting_pile_key"] = _pile_collect_key(tx, ty, rtype)
+            pl["_collecting_node_id"] = None
+        else:
+            return
+
     # ---------------------------------------------------------------- input
 
     async def handle_input(self, player_id: int, msg: dict):
@@ -809,6 +903,8 @@ class GameEngine:
         elif t == "silo_withdraw": await self._silo_withdraw(player_id)
         elif t == "set_pile_price": await self._set_pile_price(player_id, msg.get("resource_type"), msg.get("price"))
         elif t == "buy_pile":       await self._buy_pile(player_id, msg.get("resource_type"), msg.get("amount"))
+        elif t == "start_collect": await self._start_collect(player_id, msg)
+        elif t == "stop_collect":  await self._stop_collect(player_id)
         elif t == "npc_shop_buy":   await self._npc_shop_buy(player_id, msg.get("shop"), msg.get("item"))
         elif t == "repair":         await self._repair(player_id, msg.get("component"))
         elif t == "upgrade_wb":     await self._upgrade_wb(player_id, msg.get("component"))
@@ -1486,6 +1582,8 @@ class GameEngine:
         tax_str = f" (+{tax}c town tax)" if tax else ""
         await self._send(player_id, {"type": "notice",
             "msg": f"Paid {cost}c for {can} {resource_type}. Stand on or next to the pile to load into your barrow.{tax_str}"})
+        player["_collecting_pile_key"] = _pile_collect_key(key[0], key[1], resource_type)
+        player["_collecting_node_id"] = None
 
     # ---- NPC shops ----------------------------------------------------------
 
@@ -2044,8 +2142,6 @@ class GameEngine:
     async def tick(self, resource_tick_s: int, persist_interval_s: int):
         now = time.monotonic()
         dt = settings.game_tick_ms / 1000.0
-
-        _t = time.monotonic()
         blocked_movement = self._movement_blocked_tiles()
         for pid in list(self.sockets.keys()):
             pl = self.players.get(pid)
@@ -2058,7 +2154,6 @@ class GameEngine:
                 self._dispatch_wb_move_events(pid, ev)
             except Exception:
                 logging.exception("integrate_player_movement")
-        _move_ms = (time.monotonic() - _t) * 1000
 
         prev_season = self.season.season
         if self.season.tick():
@@ -2071,14 +2166,12 @@ class GameEngine:
                 await self._grow_roads_new_year()
             await self._broadcast_all({"type": "season_change", "season": self.season.wire()})
 
-        _t = time.monotonic()
         if now - self._last_resource_tick >= resource_tick_s:
             elapsed = now - self._last_resource_tick
             self._last_resource_tick = now
             # Avoid extreme catch-up if the process was busy or timers were skewed.
             elapsed = min(elapsed, 120.0)
             await self._do_resource_tick(elapsed)
-        _rtick_ms = (time.monotonic() - _t) * 1000
 
         if now - self._last_market_drift >= MARKET_DRIFT_INTERVAL:
             self._last_market_drift = now
@@ -2089,48 +2182,19 @@ class GameEngine:
             self._last_election_check = now
             await self._do_election_check()
 
-        _t = time.monotonic()
         await self._broadcast_state()
-        _bcast_ms = (time.monotonic() - _t) * 1000
-
-        if _move_ms + _rtick_ms + _bcast_ms > 150:
-            logging.warning(
-                "wheelbarrow: tick sections move=%.1fms rtick=%.1fms bcast=%.1fms",
-                _move_ms, _rtick_ms, _bcast_ms,
-            )
 
         if now - self._last_persist >= persist_interval_s:
             self._last_persist = now
-            # Run persist in the background so tick() returns immediately — keeping movement
-            # integration on its 100ms cadence. Without this, 500 nodes × 2-5ms/save = 1-5s
-            # stall inside tick(), which freezes the wheelbarrow for each persist cycle.
-            if self._persist_task is None or self._persist_task.done():
-                self._persist_task = asyncio.create_task(self._do_persist())
-            else:
-                logging.warning("wheelbarrow: skipping persist — previous persist still running")
-
-    async def _do_persist(self):
-        """Persist all live state to DB. Runs as a background task to avoid stalling tick()."""
-        _t0 = time.monotonic()
-        try:
-            players_to_save = [p for p in self.players.values() if p["id"] in self.sockets]
-            for p in players_to_save:
-                await queries.save_player(p)
-            nodes_to_save = list(self.nodes.values())
-            for n in nodes_to_save:
+            for p in self.players.values():
+                if p["id"] in self.sockets:
+                    await queries.save_player(p)
+            for n in self.nodes.values():
                 await queries.save_node(n)
-            structs_to_save = list(self.structures.values())
-            for s in structs_to_save:
+            for s in self.structures.values():
                 await queries.save_structure(s)
-            towns_to_save = list(self.towns.values())
-            for t in towns_to_save:
+            for t in self.towns.values():
                 await queries.update_town(t)
-        except Exception:
-            logging.exception("wheelbarrow: background persist failed")
-        finally:
-            dt = time.monotonic() - _t0
-            if dt > 1.0:
-                logging.warning("wheelbarrow: persist took %.2fs (%d nodes)", dt, len(self.nodes))
 
     async def _do_resource_tick(self, elapsed: float):
         all_nodes = {**self.nodes, **self.structures}
@@ -2147,20 +2211,34 @@ class GameEngine:
             if player["id"] not in self.sockets:
                 continue
             await asyncio.sleep(0)
-            px, py = float(player["x"]), float(player["y"])
             ptx, pty = player_tile_xy(player)
             cap   = effective_bucket_cap(player)
             load  = _bucket_total(player.get("bucket", {}))
             space = cap - load
 
-            # Paid pile purchases: load into barrow over time while standing on the tile
+            # Paid pile purchases: attach active pile key when in range (covers legacy pending before explicit collect)
+            pending_pre = player.get("_pending_pile_loads") or []
+            if pending_pre and not player.get("_collecting_pile_key"):
+                pl0 = pending_pre[0]
+                if max(abs(ptx - int(pl0["x"])), abs(pty - int(pl0["y"]))) <= COLLECTION_RADIUS:
+                    player["_collecting_pile_key"] = _pile_collect_key(
+                        int(pl0["x"]), int(pl0["y"]), pl0["rtype"],
+                    )
+                    player["_collecting_node_id"] = None
+
+            # Paid pile purchases: load while in range and this pile is the active collect target
             pending = player.get("_pending_pile_loads") or []
             new_pending: list[dict] = []
+            ck = player.get("_collecting_pile_key")
             for pl in pending:
                 rem = float(pl.get("remaining", 0))
                 if rem <= 0:
                     continue
-                if max(abs(ptx - int(pl["x"])), abs(pty - int(pl["y"]))) > 1:
+                if max(abs(ptx - int(pl["x"])), abs(pty - int(pl["y"]))) > COLLECTION_RADIUS:
+                    new_pending.append(pl)
+                    continue
+                pile_k = _pile_collect_key(int(pl["x"]), int(pl["y"]), pl["rtype"])
+                if ck != pile_k:
                     new_pending.append(pl)
                     continue
                 load = _bucket_total(player.get("bucket", {}))
@@ -2196,6 +2274,8 @@ class GameEngine:
                         continue
                     if pile["amount"] <= 0:
                         continue
+                    if player.get("_collecting_pile_key") != _pile_collect_key(tcx, tcy, rtype):
+                        continue
                     rate = COLLECTION_RATES.get(rtype, COLLECTION_RATE) * PILE_COLLECTION_MULT
                     load = _bucket_total(player.get("bucket", {}))
                     space = cap - load
@@ -2222,14 +2302,21 @@ class GameEngine:
 
             load = _bucket_total(player.get("bucket", {}))
             space = cap - load
+            active_nid = player.get("_collecting_node_id")
             for node in all_nodes.values():
                 if node.get("construction_active"):
                     continue
                 if node.get("is_market") or node.get("is_town_hall"):
                     continue
-                if abs(px - node["x"]) > COLLECTION_RADIUS:
+                ntx, nty = int(node["x"]), int(node["y"])
+                if max(abs(ptx - ntx), abs(pty - nty)) > COLLECTION_RADIUS:
                     continue
-                if abs(py - node["y"]) > COLLECTION_RADIUS:
+                if active_nid is None:
+                    continue
+                try:
+                    if int(node.get("id")) != int(active_nid):
+                        continue
+                except (TypeError, ValueError):
                     continue
                 cap   = effective_bucket_cap(player)
                 load  = _bucket_total(player.get("bucket", {}))
@@ -2246,6 +2333,8 @@ class GameEngine:
                     owner = self.players.get(node["owner_id"])
                     if owner and node["owner_id"] != player["id"]:
                         owner["coins"] += node.get("collect_fee", 1)
+
+            self._refresh_collecting_state(player, ptx, pty, all_nodes)
         self._invalidate_movement_blocked_cache()
 
     async def _do_market_drift(self):
@@ -2412,6 +2501,8 @@ class GameEngine:
             "wb_tire_level":   p.get("wb_tire_level",   1),
             "wb_handle_level": p.get("wb_handle_level", 1),
             "wb_barrow_level": p.get("wb_barrow_level", 1),
+            "collecting_node_id": p.get("_collecting_node_id"),
+            "collecting_pile_key": p.get("_collecting_pile_key"),
         }
 
     def _node_wire(self, n: dict) -> dict:

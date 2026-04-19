@@ -15,7 +15,7 @@ Inspired by the spirit of [A Tractor](https://store.steampowered.com/app/779050/
 ### The basics
 - Move with **arrow keys** or **WASD** — speed depends on your load; heavier materials (gravel, stone) slow you significantly; an empty aluminium barrow is faster than a loaded plastic one
 - **Other players** only appear while they have an active browser session; when someone disconnects, their wheelbarrow disappears from your view until they log in again (their land and piles stay in the world)
-- **Park near a resource** and your bucket slowly fills — proximity collection is passive
+- **Pull up within one tile** (Chebyshev distance) of a **wild resource node** or a **free pile**, then press **`[1]`–`[9]`** as shown in the HUD to **start** loading; stay in range until your barrow is full or press **`[V]`** to stop. Multiple nearby sources list separate number keys.
 - **Haul your load** to the NPC market (`50,60`) and press **Space** to sell; on a **large pile of your own** (`E` → **Sell all at NPC market…**), confirm to autopilot load → sell → repeat until the pile is empty (**any key except H** cancels)
 - Wild resources **deplete** over time, forcing you to travel further from spawn to find fresh nodes
 - The server runs 24/7 — park near resources before logging off and collect the difference when you return
@@ -43,7 +43,8 @@ Inspired by the spirit of [A Tractor](https://store.steampowered.com/app/779050/
 | [ | Nudge view more overhead (toward top-down) |
 | ] | Nudge view flatter (more horizon) |
 | H | Toggle HUD (hidden by default — just press H to see it) |
-| 1–9 | Select item in any open menu |
+| 1–9 | **Start loading** from a listed wild node or pile (when no menu is open — HUD shows which number is which), or select an item in an open menu |
+| V | **Stop** loading into the barrow (while a load is active) |
 | Esc | Cancel parcel preview / close menu |
 
 ### The economy ladder
@@ -195,4 +196,4 @@ See `wheelbarrow.service` for the service unit template. Deployment is handled m
 
 ## Version
 
-Current version: **0.12.45** (see `pyproject.toml`, and cache-bust query on scripts in `client/index.html`). See [CHANGELOG.md](CHANGELOG.md).
+Current version: **0.10.4** (see `VERSION`, `pyproject.toml`, and cache-bust query on scripts in `client/index.html`). See [CHANGELOG.md](CHANGELOG.md).

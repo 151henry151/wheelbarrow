@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.71] - 2026-04-19
+
+### Changed
+- **Server** (`server/game/engine.py`): **Require** **an** **explicit** **`start_collect`** **target** **(and** **`stop_collect`)** **before** **moving** **materials** **from** **wild** **nodes** **or** **free** **piles** **into** **the** **barrow;** **continue** **only** **while** **the** **player** **tile** **stays** **within** **Chebyshev** **distance** **≤** **1** **of** **that** **source** **—** **tile-based** **range** **checks** **(no** **float** **position** **vs** **node** **tile** **mismatch);** **paid** **pile** **purchases** **auto-set** **the** **active** **pile** **key** **and** **still** **require** **the** **same** **proximity** **rules**
+- **Client** (`client/js/game.js`): **HUD** **lists** **`[1]`–`[9]`** **per** **nearby** **load** **target** **and** **`[V]`** **to** **stop;** **send** **`start_collect`** **/** **`stop_collect`;** **sell** **autopilot** **sends** **`start_collect`** **on** **the** **owner** **pile** **when** **parked** **so** **the** **loop** **still** **fills** **the** **barrow**
+- **Docs** (`README.md`): **Document** **manual** **load** **keys** **and** **`V`**
+
+## [0.12.70] - 2026-04-19
+
+### Changed
+- **Client** (`client/js/renderer.js`): **Stop** **drawing** **owner** **names** **above** **each** **player** **structure** **and** **player** **market** **—** **parcel** **overlay** **already** **shows** **who** **owns** **the** **plot**
+
 ## [0.12.69] - 2026-04-19
 
 ### Changed
