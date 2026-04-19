@@ -196,4 +196,4 @@ See `wheelbarrow.service` for the service unit template. Deployment is handled m
 
 ## Version
 
-Current version: **0.10.4** (see `VERSION`, `pyproject.toml`, and cache-bust query on scripts in `client/index.html`). See [CHANGELOG.md](CHANGELOG.md).
+Current version: **0.12.79** (see `VERSION`, `pyproject.toml`, and cache-bust query on scripts in `client/index.html`). See [CHANGELOG.md](CHANGELOG.md).

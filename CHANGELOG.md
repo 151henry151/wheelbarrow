@@ -7,8 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.79] - 2026-04-19
+
 ### Added
 - **Docs** (`docs/ENGINE-TICK-AND-PERSIST.md`): Document why `tick()` must not block on full DB persist (asyncio/event-loop movement freeze; relation to v0.12.71 / v0.12.73); **Cursor** (`.cursor/rules/engine-tick-persist.mdc`)
+
+### Fixed
+- **Server** (`server/game/engine.py`): Restore `_persist_task` / `_do_persist()` background-task pattern that was accidentally removed during chat implementation. The chat commit replaced it with inline `await queries.save_*` calls directly in `tick()`, causing the event loop to block on every persist interval and stalling move-message processing — the same movement-freeze bug fixed in v0.12.73.
 
 ## [0.12.78] - 2026-04-19
 
