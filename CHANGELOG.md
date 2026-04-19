@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.69] - 2026-04-19
+
+### Changed
+- **Server** (`server/game/movement.py`): **Lower** **`TURN_RADIANS_PER_SEC`** **from** **2.8** **to** **1.6** **—** **slower** **maximum** **yaw** **rate** **so** **keyboard** **steering** **is** **less** **twitchy** **and** **easier** **to** **correct**
+- **Client** (`client/js/game.js`): **Raise** **sell-autopilot** **heading** **gain** **in** **proportion** **to** **the** **old** **/** **new** **turn** **rate** **so** **autopilot** **paths** **still** **converge** **in** **reasonable** **time**
+
 ## [0.12.68] - 2026-04-19
 
 ### Changed

@@ -20,7 +20,8 @@ from server.game.wb_condition import apply_move_decay, effective_bucket_cap
 _MAX_W_UNIT = 2.5  # match client RESOURCE_WEIGHT_MAX_UNIT
 
 BASE_MOVE_TILES_PER_SEC = 6.0
-TURN_RADIANS_PER_SEC = 2.8
+# Max turn rate at turn=±1 (radians/sec). Lower = less twitchy steering; was 2.8.
+TURN_RADIANS_PER_SEC = 1.6
 # Faster on dirt roads (no heading lock — steering stays fully player-controlled).
 ROAD_SPEED_MULT = 1.38
 

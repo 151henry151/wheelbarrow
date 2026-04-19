@@ -301,6 +301,11 @@ function _angleWrap(d) {
   return a;
 }
 
+/** Must match `TURN_RADIANS_PER_SEC` in `server/game/movement.py` (used to scale sell autopilot vs legacy 2.8). */
+const _SERVER_TURN_RAD_PER_S = 1.6;
+const _LEGACY_TURN_RAD_PER_S = 2.8;
+const _AUTOPILOT_TURN_GAIN = 2.2 * (_LEGACY_TURN_RAD_PER_S / _SERVER_TURN_RAD_PER_S);
+
 async function _autopilotMoveToTile(tx, ty) {
   const ARRIVE = 0.45;
   let guard = 0;
@@ -316,7 +321,7 @@ async function _autopilotMoveToTile(tx, ty) {
     const desired = Math.atan2(dy, dx);
     const cur = state.player.angle != null ? state.player.angle : Math.PI / 2;
     const diff = _angleWrap(desired - cur);
-    const turn = Math.max(-1, Math.min(1, diff * 2.2));
+    const turn = Math.max(-1, Math.min(1, diff * _AUTOPILOT_TURN_GAIN));
     let fwd = Math.abs(diff) < 0.35 ? 1.0 : 0.35;
     state.facing = _facingFromAngle(cur);
     WS.send({ type: 'move', fwd, turn });
