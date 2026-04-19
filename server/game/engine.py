@@ -194,6 +194,13 @@ class GameEngine:
         # Water / bridges — can be 10⁵+ tiles; scanning all each tick starved asyncio (no ticks / no movement).
         self._water_chunks: dict[tuple[int, int], list[tuple[int, int]]] = {}
         self._bridge_chunks: dict[tuple[int, int], list[tuple[int, int]]] = {}
+        # Soil / crops / piles / poor_soil — full-world scans per player in _broadcast_state starved asyncio.
+        self._soil_chunks: dict[tuple[int, int], list[tuple[int, int]]] = {}
+        self._soil_chunk_known: set[tuple[int, int]] = set()
+        self._crop_chunks: dict[tuple[int, int], set[tuple[int, int]]] = {}
+        self._pile_chunks: dict[tuple[int, int], set[tuple[int, int]]] = {}
+        self._pile_indexed_tiles: set[tuple[int, int]] = set()
+        self._poor_soil_chunks: dict[tuple[int, int], set[tuple[int, int]]] = {}
 
     # ------------------------------------------------------------------ load
 
@@ -236,14 +243,17 @@ class GameEngine:
         for pile in await queries.load_all_piles():
             key = (pile["x"], pile["y"])
             self.piles.setdefault(key, {})[pile["resource_type"]] = dict(pile)
+        self._rebuild_pile_chunk_index()
         self._rebuild_wild_node_chunk_index()
         await queries.ensure_crop_winter_dead_column()
         await queries.ensure_soil_tiles_table()
         await queries.cleanup_legacy_harvested_crop_rows()
         for row in await queries.load_all_soil_tiles():
             self.soil[(int(row["x"]), int(row["y"]))] = int(row["tilled"])
+        self._rebuild_soil_chunk_index()
         for crop in await queries.load_all_crops():
             self.crops[(crop["x"], crop["y"])] = dict(crop)
+        self._rebuild_crop_chunk_index()
 
         await queries.ensure_terrain_tables()
         # Seed if DB has no water but world content exists. Do not require world_gen_state.done —
@@ -262,6 +272,7 @@ class GameEngine:
         else:
             self.water_tiles = set(await queries.load_all_water_tiles())
             self.poor_soil = set(await queries.load_all_poor_soil_tiles())
+        self._rebuild_poor_soil_chunk_index()
         self.bridge_tiles = set(await queries.load_all_bridge_tiles())
         self.bridge_progress = {}
         for row in await queries.load_all_bridge_progress():
@@ -409,6 +420,7 @@ class GameEngine:
             if not pile_map:
                 del self.piles[(tx, ty)]
         if rotted_tiles:
+            self._rebuild_pile_chunk_index()
             self._invalidate_movement_blocked_cache()
             await self._broadcast_all({
                 "type": "notice",
@@ -477,6 +489,78 @@ class GameEngine:
 
     def _invalidate_movement_blocked_cache(self) -> None:
         self._movement_blocked_cache = None
+
+    def _rebuild_soil_chunk_index(self) -> None:
+        self._soil_chunks = {}
+        self._soil_chunk_known = set()
+        for sx, sy in self.soil.keys():
+            self._ensure_soil_tile_chunk(sx, sy)
+
+    def _ensure_soil_tile_chunk(self, tx: int, ty: int) -> None:
+        key = (tx, ty)
+        if key in self._soil_chunk_known:
+            return
+        self._soil_chunk_known.add(key)
+        ck = (tx // WILD_NODE_CHUNK, ty // WILD_NODE_CHUNK)
+        self._soil_chunks.setdefault(ck, []).append(key)
+
+    def _rebuild_crop_chunk_index(self) -> None:
+        self._crop_chunks = {}
+        for x, y in self.crops.keys():
+            ck = (x // WILD_NODE_CHUNK, y // WILD_NODE_CHUNK)
+            self._crop_chunks.setdefault(ck, set()).add((x, y))
+
+    def _crop_add_to_index(self, x: int, y: int) -> None:
+        ck = (x // WILD_NODE_CHUNK, y // WILD_NODE_CHUNK)
+        self._crop_chunks.setdefault(ck, set()).add((x, y))
+
+    def _crop_remove_from_index(self, x: int, y: int) -> None:
+        ck = (x // WILD_NODE_CHUNK, y // WILD_NODE_CHUNK)
+        s = self._crop_chunks.get(ck)
+        if s:
+            s.discard((x, y))
+
+    def _pile_tile_has_content(self, tx: int, ty: int) -> bool:
+        pm = self.piles.get((tx, ty))
+        if not pm:
+            return False
+        return any(float(p.get("amount", 0) or 0) > 0 for p in pm.values())
+
+    def _rebuild_pile_chunk_index(self) -> None:
+        self._pile_chunks = {}
+        self._pile_indexed_tiles = set()
+        for tx, ty in self.piles.keys():
+            if not self._pile_tile_has_content(tx, ty):
+                continue
+            self._pile_indexed_tiles.add((tx, ty))
+            ck = (tx // WILD_NODE_CHUNK, ty // WILD_NODE_CHUNK)
+            self._pile_chunks.setdefault(ck, set()).add((tx, ty))
+
+    def _sync_pile_tile_index(self, tx: int, ty: int) -> None:
+        key = (tx, ty)
+        ck = (tx // WILD_NODE_CHUNK, ty // WILD_NODE_CHUNK)
+        has = self._pile_tile_has_content(tx, ty)
+        had = key in self._pile_indexed_tiles
+        if has and not had:
+            self._pile_indexed_tiles.add(key)
+            self._pile_chunks.setdefault(ck, set()).add(key)
+        elif not has and had:
+            self._pile_indexed_tiles.discard(key)
+            s = self._pile_chunks.get(ck)
+            if s:
+                s.discard(key)
+
+    def _rebuild_poor_soil_chunk_index(self) -> None:
+        self._poor_soil_chunks = {}
+        for x, y in self.poor_soil:
+            ck = (x // WILD_NODE_CHUNK, y // WILD_NODE_CHUNK)
+            self._poor_soil_chunks.setdefault(ck, set()).add((x, y))
+
+    def _poor_soil_remove_from_index(self, x: int, y: int) -> None:
+        ck = (x // WILD_NODE_CHUNK, y // WILD_NODE_CHUNK)
+        s = self._poor_soil_chunks.get(ck)
+        if s:
+            s.discard((x, y))
 
     def _movement_blocked_tiles(self) -> set[tuple[int, int]]:
         """Tiles wheelbarrows cannot enter: nodes, structures, tiles with resource piles.
@@ -979,6 +1063,7 @@ class GameEngine:
                 parcel_id, player_id, tx, ty, rtype, new_amt, existing.get("sell_price"),
             )
             self.piles[key][rtype] = dict(pile_row)
+        self._sync_pile_tile_index(tx, ty)
         self._invalidate_movement_blocked_cache()
 
     async def _cancel_construction(self, player_id: int):
@@ -1101,6 +1186,7 @@ class GameEngine:
         if bucket["dirt"] <= 0:
             del bucket["dirt"]
         self.poor_soil.discard((tx, ty))
+        self._poor_soil_remove_from_index(tx, ty)
         await queries.delete_poor_soil_tile(tx, ty)
         await queries.save_player(player)
         await self._send(player_id, {"type": "notice", "msg": "Soil improved — you can till this tile now."})
@@ -1296,6 +1382,7 @@ class GameEngine:
             )
             self.piles[key][rtype] = dict(pile_row)
             total += amt
+        self._sync_pile_tile_index(tx, ty)
         player["bucket"] = {}
         await queries.save_player(player)
         parts = []
@@ -1336,6 +1423,7 @@ class GameEngine:
             pile.get("parcel_id"), player_id, *key, resource_type, pile["amount"], sp,
         )
         self.piles[key][resource_type] = dict(pile_row)
+        self._sync_pile_tile_index(key[0], key[1])
         await self._send(player_id, {"type": "notice",
             "msg": f"{resource_type}: {'not for sale' if sp is None else f'{sp}c/unit'}"})
 
@@ -1377,11 +1465,14 @@ class GameEngine:
         if pile["amount"] <= 0:
             del self.piles[key][resource_type]
             await queries.delete_pile(*key, resource_type)
+            if not self.piles[key]:
+                del self.piles[key]
         else:
             await queries.upsert_pile(
                 pile.get("parcel_id"), pile["owner_id"], *key,
                 resource_type, pile["amount"], pile["sell_price"],
             )
+        self._sync_pile_tile_index(key[0], key[1])
         player.setdefault("_pending_pile_loads", []).append({
             "x": key[0], "y": key[1], "rtype": resource_type, "remaining": float(can),
         })
@@ -1564,9 +1655,11 @@ class GameEngine:
                     "msg": "Poor soil — deposit 1 dirt here ([I]) before you can till away the stubble."})
                 return
             await queries.harvest_crop(crop["id"])
+            self._crop_remove_from_index(tx, ty)
             del self.crops[(tx, ty)]
             await queries.upsert_soil_tile(tx, ty, 1)
             self.soil[(tx, ty)] = 1
+            self._ensure_soil_tile_chunk(tx, ty)
             await self._send(player_id, {
                 "type": "notice",
                 "msg": "Tilled — frosted stubble cleared. Plant wheat in spring when the soil is tilled.",
@@ -1595,10 +1688,12 @@ class GameEngine:
                     return
                 player.setdefault("bucket", {})[crop["crop_type"]] = round(
                     player["bucket"].get(crop["crop_type"], 0) + take, 2)
+                self._crop_remove_from_index(tx, ty)
                 del self.crops[(tx, ty)]
                 await queries.harvest_crop(crop["id"])
                 await queries.upsert_soil_tile(tx, ty, 0)
                 self.soil[(tx, ty)] = 0
+                self._ensure_soil_tile_chunk(tx, ty)
                 await self._send(player_id, {"type": "notice", "msg": f"Harvested {round(take,1)} {crop['crop_type']}! Till before planting again."})
                 return
             pocket = player.setdefault("pocket", {})
@@ -1703,8 +1798,10 @@ class GameEngine:
             row["ready_at"] = ready_at
             row["winter_dead"] = 0
             self.crops[(tx, ty)] = dict(row)
+            self._crop_add_to_index(tx, ty)
             await queries.upsert_soil_tile(tx, ty, 0)
             self.soil[(tx, ty)] = 0
+            self._ensure_soil_tile_chunk(tx, ty)
             await self._send(player_id, {"type": "notice", "msg": "Planted wheat! Ready in ~20 min."})
             return
 
@@ -1720,6 +1817,7 @@ class GameEngine:
 
         await queries.upsert_soil_tile(tx, ty, 1)
         self.soil[(tx, ty)] = 1
+        self._ensure_soil_tile_chunk(tx, ty)
         await self._send(player_id, {"type": "notice", "msg": "Tilled the soil. Plant wheat seeds in spring ([F])."})
 
     # ---- player market ------------------------------------------------------
@@ -2008,6 +2106,7 @@ class GameEngine:
         for player in self.players.values():
             if player["id"] not in self.sockets:
                 continue
+            await asyncio.sleep(0)
             px, py = float(player["x"]), float(player["y"])
             ptx, pty = player_tile_xy(player)
             cap   = effective_bucket_cap(player)
@@ -2072,6 +2171,9 @@ class GameEngine:
                     if pile["amount"] <= 0:
                         del self.piles[(tcx, tcy)][rtype]
                         await queries.delete_pile(tcx, tcy, rtype)
+                        if not self.piles[(tcx, tcy)]:
+                            del self.piles[(tcx, tcy)]
+                        self._sync_pile_tile_index(tcx, tcy)
                     else:
                         await queries.upsert_pile(
                             pile.get("parcel_id"), pile["owner_id"], tcx, tcy, rtype,
@@ -2214,16 +2316,8 @@ class GameEngine:
             px, py = player_tile_xy(player)
             # Viewport-culled wild nodes (chunk index) / piles / crops (integer tile — matches grid)
             nearby_nodes = self._nearby_wild_nodes_wire(px, py)
-            nearby_piles = [
-                self._pile_wire(pile, rtype)
-                for (tile_key), pile_map in self.piles.items()
-                for rtype, pile in pile_map.items()
-                if abs(tile_key[0] - px) <= VIEWPORT_RADIUS and abs(tile_key[1] - py) <= VIEWPORT_RADIUS
-            ]
-            nearby_crops = [
-                self._crop_wire(c) for c in self.crops.values()
-                if abs(c["x"] - px) <= VIEWPORT_RADIUS and abs(c["y"] - py) <= VIEWPORT_RADIUS
-            ]
+            nearby_piles = self._nearby_piles_wire(px, py)
+            nearby_crops = self._nearby_crops_wire(px, py)
             nearby_roads = self._nearby_roads_wire(px, py)
             nearby_soil = self._nearby_soil_tiles(px, py)
             nearby_water = self._nearby_water_tiles(px, py)
@@ -2248,6 +2342,7 @@ class GameEngine:
                 },
                 pid=pid,
             )
+            await asyncio.sleep(0)
 
     async def _broadcast_all(self, msg: dict):
         for pid, ws in list(self.sockets.items()):
@@ -2386,11 +2481,55 @@ class GameEngine:
                 out.append({"key": k, "x": v[0], "y": v[1], "label": NPC_SHOP_LABELS[k]})
         return out
 
-    def _nearby_soil_tiles(self, px: int, py: int) -> list[dict]:
+    def _nearby_piles_wire(self, px: int, py: int) -> list[dict]:
+        """O(chunks in viewport) instead of scanning every pile tile each tick per player."""
+        R = VIEWPORT_RADIUS
+        x0, x1 = px - R, px + R
+        y0, y1 = py - R, py + R
+        c0x, c1x = x0 // WILD_NODE_CHUNK, x1 // WILD_NODE_CHUNK
+        c0y, c1y = y0 // WILD_NODE_CHUNK, y1 // WILD_NODE_CHUNK
         out: list[dict] = []
-        for (sx, sy), tv in self.soil.items():
-            if abs(sx - px) <= VIEWPORT_RADIUS and abs(sy - py) <= VIEWPORT_RADIUS:
-                out.append({"x": sx, "y": sy, "tilled": int(tv)})
+        for cx in range(c0x, c1x + 1):
+            for cy in range(c0y, c1y + 1):
+                for tx, ty in self._pile_chunks.get((cx, cy), set()):
+                    if abs(tx - px) > R or abs(ty - py) > R:
+                        continue
+                    pile_map = self.piles.get((tx, ty))
+                    if not pile_map:
+                        continue
+                    for rtype, pile in pile_map.items():
+                        out.append(self._pile_wire(pile, rtype))
+        return out
+
+    def _nearby_crops_wire(self, px: int, py: int) -> list[dict]:
+        R = VIEWPORT_RADIUS
+        x0, x1 = px - R, px + R
+        y0, y1 = py - R, py + R
+        c0x, c1x = x0 // WILD_NODE_CHUNK, x1 // WILD_NODE_CHUNK
+        c0y, c1y = y0 // WILD_NODE_CHUNK, y1 // WILD_NODE_CHUNK
+        out: list[dict] = []
+        for cx in range(c0x, c1x + 1):
+            for cy in range(c0y, c1y + 1):
+                for x, y in self._crop_chunks.get((cx, cy), set()):
+                    if abs(x - px) <= R and abs(y - py) <= R:
+                        c = self.crops.get((x, y))
+                        if c:
+                            out.append(self._crop_wire(c))
+        return out
+
+    def _nearby_soil_tiles(self, px: int, py: int) -> list[dict]:
+        R = VIEWPORT_RADIUS
+        x0, x1 = px - R, px + R
+        y0, y1 = py - R, py + R
+        c0x, c1x = x0 // WILD_NODE_CHUNK, x1 // WILD_NODE_CHUNK
+        c0y, c1y = y0 // WILD_NODE_CHUNK, y1 // WILD_NODE_CHUNK
+        out: list[dict] = []
+        for cx in range(c0x, c1x + 1):
+            for cy in range(c0y, c1y + 1):
+                for sx, sy in self._soil_chunks.get((cx, cy), ()):
+                    if abs(sx - px) <= R and abs(sy - py) <= R:
+                        tv = self.soil.get((sx, sy), 0)
+                        out.append({"x": sx, "y": sy, "tilled": int(tv)})
         return out
 
     def _nearby_water_tiles(self, px: int, py: int) -> list[dict]:
@@ -2423,28 +2562,32 @@ class GameEngine:
 
     def _nearby_poor_soil_tiles(self, px: int, py: int, player_id: int) -> list[dict]:
         """Only tiles on land this player owns — used for [I] hints; not shown to others."""
+        R = VIEWPORT_RADIUS
+        x0, x1 = px - R, px + R
+        y0, y1 = py - R, py + R
+        c0x, c1x = x0 // WILD_NODE_CHUNK, x1 // WILD_NODE_CHUNK
+        c0y, c1y = y0 // WILD_NODE_CHUNK, y1 // WILD_NODE_CHUNK
         out: list[dict] = []
-        for (x, y) in self.poor_soil:
-            if abs(x - px) > VIEWPORT_RADIUS or abs(y - py) > VIEWPORT_RADIUS:
-                continue
-            pid = self.parcel_at.get((x, y))
-            if pid is None:
-                continue
-            par = self.world_parcels.get(pid)
-            if par and par.get("owner_id") == player_id:
-                out.append({"x": x, "y": y})
+        for cx in range(c0x, c1x + 1):
+            for cy in range(c0y, c1y + 1):
+                for x, y in self._poor_soil_chunks.get((cx, cy), set()):
+                    if abs(x - px) > R or abs(y - py) > R:
+                        continue
+                    if (x, y) not in self.poor_soil:
+                        continue
+                    pid = self.parcel_at.get((x, y))
+                    if pid is None:
+                        continue
+                    par = self.world_parcels.get(pid)
+                    if par and par.get("owner_id") == player_id:
+                        out.append({"x": x, "y": y})
         return out
 
     def full_state(self, player_id: int) -> dict:
         player = self.players[player_id]
         px, py = player_tile_xy(player)
         nearby_nodes = self._nearby_wild_nodes_wire(px, py)
-        nearby_piles = [
-            self._pile_wire(pile, rtype)
-            for tile_key, pile_map in self.piles.items()
-            for rtype, pile in pile_map.items()
-            if abs(tile_key[0]-px) <= VIEWPORT_RADIUS and abs(tile_key[1]-py) <= VIEWPORT_RADIUS
-        ]
+        nearby_piles = self._nearby_piles_wire(px, py)
         nearby_roads = self._nearby_roads_wire(px, py)
         nearby_soil = self._nearby_soil_tiles(px, py)
         nearby_water = self._nearby_water_tiles(px, py)
@@ -2462,7 +2605,7 @@ class GameEngine:
             "water_tiles": nearby_water,
             "bridge_tiles": nearby_bridges,
             "poor_soil_tiles": nearby_poor,
-            "crops":       [self._crop_wire(c) for c in self.crops.values()],
+            "crops":       self._nearby_crops_wire(px, py),
             "npc_markets": self._all_npc_markets_wire(),
             "npc_shops":   self._all_npc_shops_wire(),
             "towns":       [self._town_wire(t) for t in self.towns.values()],

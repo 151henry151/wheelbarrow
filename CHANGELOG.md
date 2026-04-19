@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.59] - 2026-04-16
+
+### Fixed
+- **Server** (`server/game/engine.py`): **Index** **soil** **tiles,** **crops,** **resource** **piles,** **and** **poor-soil** **tiles** **by** **64×64** **chunks** **for** **viewport** **queries** **in** **`_broadcast_state`** **and** **`full_state`** **—** **avoids** **O(|world|)** **Python** **loops** **per** **connected** **player** **each** **tick** **that** **blocked** **the** **asyncio** **event** **loop** **(matches** **multi-second** **movement** **freezes** **while** **the** **camera** **still** **orbits;** **often** **misread** **as** **~5s** **aligned** **with** **`resource_tick_s`)**
+- **Server** (`server/game/engine.py`): **`await asyncio.sleep(0)`** **after** **each** **player** **tick** **payload** **in** **`_broadcast_state`** **and** **at** **the** **start** **of** **each** **connected** **player** **in** **`_do_resource_tick`** **—** **yield** **so** **WebSocket** **`receive`** **/** **`handle_input`** **can** **run** **during** **heavy** **ticks**
+
 ## [0.12.58] - 2026-04-18
 
 ### Fixed
