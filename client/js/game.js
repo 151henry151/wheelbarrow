@@ -1,5 +1,3 @@
-const GAME_VERSION = 'v0.12.63';
-
 // Mirrored from server/game/constants.py
 const WB_BARROW_MATERIAL_NAMES = { 1: 'plastic', 2: 'steel',    3: 'aluminium' };
 const WB_TIRE_TYPE_NAMES        = { 1: 'regular', 2: 'tubeless', 3: 'heavy-duty' };
@@ -117,7 +115,7 @@ const state = {
   sellAutopilotPile:   null,   // { x, y, resource_type } while running
   /** Set each frame: orbit yaw locked behind barrow while any move/turn key or autopilot */
   cameraFollowDriving: false,
-  /** While follow-driving: renderer snaps camera yaw when steering (A/D/arrows). */
+  /** While true + follow-driving: renderer snaps camera yaw to barrow (no lerp lag while steering). */
   cameraTurnKeysHeld: false,
   _tickWaiters:        [],
   _soldWaiter:         null,
@@ -145,6 +143,14 @@ function _parcelAt(x, y) {
     if (x >= p.x && x < p.x + p.w && y >= p.y && y < p.y + p.h) return p;
   }
   return null;
+}
+
+/** Integer tile under the player (matches server `player_tile_xy`). Use for piles, crops, soil, structures on a tile. */
+function _playerTileXY(player) {
+  if (!player || !Number.isFinite(player.x) || !Number.isFinite(player.y)) {
+    return { tx: 0, ty: 0 };
+  }
+  return { tx: Math.floor(player.x), ty: Math.floor(player.y) };
 }
 
 /** Matches server free pile pickup (priced → owner only; on owner's land → owner only; else public). */
@@ -194,10 +200,12 @@ function _adjFromFacing(px, py, facing) {
 
 function _nearNpcMarket(px, py) {
   const mks = state.npc_markets || [];
-  return mks.some(m => Math.abs(m.x - px) <= 1 && Math.abs(m.y - py) <= 1);
+  const tx = Math.floor(px);
+  const ty = Math.floor(py);
+  return mks.some(m => Math.abs(m.x - tx) <= 1 && Math.abs(m.y - ty) <= 1);
 }
 
-/** True when [Space] sell works — matches server `_at_any_npc_market` (Chebyshev ≤1; floored tile coords). */
+/** True when player may use [Space] to sell — matches server `_at_any_npc_market` (Chebyshev ≤1 from market tile). */
 function _onNpcMarketTile(px, py) {
   const markets = state.npc_markets && state.npc_markets.length
     ? state.npc_markets
@@ -434,8 +442,6 @@ function updateHud() {
   if (!state.player) return;
   if (!state.hudVisible) return;
 
-  document.getElementById('hud-version').textContent = GAME_VERSION;
-
   if (state.season) {
     const mins = Math.ceil(state.season.remaining_s / 60);
     document.getElementById('hud-season').textContent =
@@ -457,8 +463,9 @@ function updateHud() {
 
   // Prices only visible when standing at/near a market
   const px = state.player.x, py = state.player.y;
+  const { tx: mtx, ty: mty } = _playerTileXY(state.player);
   const nearNpcMarket = _nearNpcMarket(px, py);
-  const nearPlayerMarket = state.nodes.some(n => n.is_market && Math.abs(n.x - px) <= 1 && Math.abs(n.y - py) <= 1);
+  const nearPlayerMarket = state.nodes.some(n => n.is_market && Math.abs(n.x - mtx) <= 1 && Math.abs(n.y - mty) <= 1);
   if (nearNpcMarket || nearPlayerMarket) {
     document.getElementById('hud-prices').textContent =
       Object.entries(state.prices).map(([k,v]) => `${k[0].toUpperCase()}${k.slice(1)}: ${v}c`).join('  ');
@@ -505,6 +512,7 @@ function _updateHint() {
   }
   const p   = state.player;
   const px  = p.x, py = p.y;
+  const { tx, ty } = _playerTileXY(p);
   const hints = [];
 
   if (state.sellAutopilotActive) {
@@ -521,7 +529,7 @@ function _updateHint() {
   if (total > 0) {
     hints.push('[U] unload (pile at your feet; wheat → silo if standing on one)');
     const siloHere = state.nodes.find(
-      n => n.is_silo && n.x === px && n.y === py && n.owner_id === p.id,
+      n => n.is_silo && n.x === tx && n.y === ty && n.owner_id === p.id,
     );
     if (siloHere && (siloHere.silo_wheat || 0) > 0) {
       hints.push('[O] withdraw wheat from silo to barrow');
@@ -529,7 +537,7 @@ function _updateHint() {
   }
 
   const siteHere = state.nodes.find(
-    n => n.construction_active && n.x === px && n.y === py && n.owner_id === p.id,
+    n => n.construction_active && n.x === tx && n.y === ty && n.owner_id === p.id,
   );
   if (siteHere) {
     if (total > 0) hints.push('[G] deliver barrow materials to this construction site');
@@ -548,10 +556,10 @@ function _updateHint() {
     hints.push('[X] cancel construction (refund deposited materials, not the start coins)');
   }
 
-  const nearShop = state.npc_shops.find(s => Math.abs(s.x - px) <= 1 && Math.abs(s.y - py) <= 1);
+  const nearShop = state.npc_shops.find(s => Math.abs(s.x - tx) <= 1 && Math.abs(s.y - ty) <= 1);
   if (nearShop) hints.push(`[E] open ${nearShop.label}`);
 
-  const nearHall = state.nodes.find(n => n.is_town_hall && Math.abs(n.x-px) <= 1 && Math.abs(n.y-py) <= 1);
+  const nearHall = state.nodes.find(n => n.is_town_hall && Math.abs(n.x - tx) <= 1 && Math.abs(n.y - ty) <= 1);
   if (nearHall) hints.push('[E] town hall');
 
   if (state.season && state.season.name === 'fall') {
@@ -574,7 +582,7 @@ function _updateHint() {
     }
   }
 
-  const pilesHere = state.piles.filter(p2 => p2.x === px && p2.y === py);
+  const pilesHere = state.piles.filter(p2 => p2.x === tx && p2.y === ty);
   if (pilesHere.length) {
     const ownPiles   = pilesHere.filter(p2 => p2.owner_id === p.id);
     const otherPiles = pilesHere.filter(p2 => p2.owner_id !== p.id && p2.sell_price != null);
@@ -588,11 +596,11 @@ function _updateHint() {
     }
   }
 
-  const near = state.nodes.find(n => !n.is_structure && Math.abs(n.x-px)<=1 && Math.abs(n.y-py)<=1 && n.amount > 0);
+  const near = state.nodes.find(n => !n.is_structure && Math.abs(n.x - tx) <= 1 && Math.abs(n.y - ty) <= 1 && n.amount > 0);
   if (near) hints.push(`Collecting ${near.type}...`);
 
   const isWinter = state.season && state.season.name === 'winter';
-  const crop = state.crops.find(c => c.x === px && c.y === py);
+  const crop = state.crops.find(c => c.x === tx && c.y === ty);
   if (crop) {
     if (crop.winter_dead) {
       if (pilesHere.length) {
@@ -608,13 +616,13 @@ function _updateHint() {
   } else if (parcel && parcel.owner_id === p.id) {
     if (pilesHere.length) {
       hints.push('Clear resource pile(s) on this tile before [F] till or plant');
-    } else if (_poorSoilAt(px, py)) {
+    } else if (_poorSoilAt(tx, ty)) {
       if ((p.bucket || {}).dirt >= 1) {
         hints.push('[I] spread 1 dirt to improve poor soil (required before tilling)');
       } else {
         hints.push('Poor soil — load dirt, then [I] here before you can till or plant');
       }
-    } else if (_soilTilledAt(px, py) === 1) {
+    } else if (_soilTilledAt(tx, ty) === 1) {
       if (state.season && state.season.name === 'spring') {
         hints.push('[F] plant wheat (tilled soil)');
       } else if (isWinter) {
@@ -630,13 +638,13 @@ function _updateHint() {
   }
 
   const myStructHere = state.nodes.find(
-    n => n.is_structure && !n.construction_active && n.x === px && n.y === py && n.owner_id === p.id,
+    n => n.is_structure && !n.construction_active && n.x === tx && n.y === ty && n.owner_id === p.id,
   );
   if (myStructHere && !myStructHere.is_town_hall) {
     hints.push('[K] tear down building (partial material refund to piles)');
   }
 
-  const adj = _adjFromFacing(px, py, state.facing);
+  const adj = _adjFromFacing(tx, ty, state.facing);
   const waterFacing = (state.water_tiles || []).some(t => t.x === adj.x && t.y === adj.y);
   const parAdj = _parcelAt(adj.x, adj.y);
   if (waterFacing) {
@@ -646,7 +654,7 @@ function _updateHint() {
     }
   }
 
-  const nearMarket = state.nodes.find(n => n.is_market && Math.abs(n.x-px)<=1 && Math.abs(n.y-py)<=1);
+  const nearMarket = state.nodes.find(n => n.is_market && Math.abs(n.x - tx) <= 1 && Math.abs(n.y - ty) <= 1);
   if (nearMarket) hints.push('[E] trade at player market');
 
   hint.textContent = hints.join('\n');
@@ -726,7 +734,8 @@ function openShopMenu(shopKey) {
 // ------------------------------------------------------------ pile menu
 function openPileMenu() {
   const p  = state.player;
-  const pilesHere = state.piles.filter(pl => pl.x === p.x && pl.y === p.y);
+  const { tx, ty } = _playerTileXY(p);
+  const pilesHere = state.piles.filter(pl => pl.x === tx && pl.y === ty);
   if (!pilesHere.length) return;
   closeAllMenus();
   state.pileMenuOpen = true;
@@ -927,7 +936,8 @@ function handleKey(key) {
   if (state.pileMenuOpen) {
     const idx = parseInt(key) - 1;
     const p   = state.player;
-    const pilesHere = state.piles.filter(pl => pl.x === p.x && pl.y === p.y);
+    const { tx, ty } = _playerTileXY(p);
+    const pilesHere = state.piles.filter(pl => pl.x === tx && pl.y === ty);
     if (idx < 0 || idx >= pilesHere.length) return;
     const pile = pilesHere[idx];
     if (pile.owner_id === p.id) {
@@ -1028,22 +1038,22 @@ function _handleBuyParcel() {
 
 function _contextInteract() {
   const p  = state.player;
-  const px = p.x, py = p.y;
+  const { tx, ty } = _playerTileXY(p);
 
   // Town hall?
-  const nearHall = state.nodes.find(n => n.is_town_hall && Math.abs(n.x-px) <= 1 && Math.abs(n.y-py) <= 1);
+  const nearHall = state.nodes.find(n => n.is_town_hall && Math.abs(n.x - tx) <= 1 && Math.abs(n.y - ty) <= 1);
   if (nearHall) { openTownMenu(nearHall); return; }
 
   // NPC shop?
-  const nearShop = state.npc_shops.find(s => Math.abs(s.x - px) <= 1 && Math.abs(s.y - py) <= 1);
+  const nearShop = state.npc_shops.find(s => Math.abs(s.x - tx) <= 1 && Math.abs(s.y - ty) <= 1);
   if (nearShop) { openShopMenu(nearShop.key); return; }
 
   // Own pile or other's pile?
-  const pilesHere = state.piles.filter(pl => pl.x === px && pl.y === py);
+  const pilesHere = state.piles.filter(pl => pl.x === tx && pl.y === ty);
   if (pilesHere.length) { openPileMenu(); return; }
 
   // Player market nearby?
-  const nearMarket = state.nodes.find(n => n.is_market && Math.abs(n.x-px)<=1 && Math.abs(n.y-py)<=1);
+  const nearMarket = state.nodes.find(n => n.is_market && Math.abs(n.x - tx) <= 1 && Math.abs(n.y - ty) <= 1);
   if (nearMarket) {
     const action = prompt('At player market: type "sell" or "buy"');
     if (!action) return;
