@@ -1085,6 +1085,72 @@ ${sdRoundBoxFn}`,
     return g;
   }
 
+  /** Deterministic 0–1 from node tile + index (stable gravel pebble layout). */
+  function _wildRng01(nx, ny, i, salt) {
+    const t = Math.sin((nx + 0.37) * 12.9898 + (ny + 0.73) * 78.233 + i * 3.14159 + salt * 19.17) * 43758.5453123;
+    return t - Math.floor(t);
+  }
+
+  /** Loose gravel heap: many small rocks, not a single faceted boulder (contrast with stone). */
+  function _wildGravelPile(g, node) {
+    const nx = node.x;
+    const ny = node.y;
+    const pile = new THREE.Group();
+    const n = 15;
+    for (let i = 0; i < n; i++) {
+      const r0 = _wildRng01(nx, ny, i, 1);
+      const r1 = _wildRng01(nx, ny, i, 2);
+      const r2 = _wildRng01(nx, ny, i, 3);
+      const size = 1.8 + r0 * 3.2;
+      const geo = new THREE.DodecahedronGeometry(size, 0);
+      const base = new THREE.Color(0x8f8a82);
+      base.offsetHSL(0, (r1 - 0.5) * 0.06, (r2 - 0.5) * 0.12);
+      const mat = new THREE.MeshLambertMaterial({ color: base.getHex() });
+      const m = new THREE.Mesh(geo, mat);
+      const ang = i * 2.51327 + r1 * 6.28318;
+      const rad = 1.2 + (i % 5) * 0.75 + r0 * 2.2;
+      m.position.set(
+        Math.cos(ang) * rad * 0.62,
+        0.8 + i * 0.38 + r2 * 1.2,
+        Math.sin(ang) * rad * 0.62,
+      );
+      m.rotation.set(r0 * 2.1, r1 * 3.7, r2 * 2.8);
+      m.castShadow = true;
+      pile.add(m);
+    }
+    pile.position.y = 3.5;
+    g.add(pile);
+  }
+
+  /** Resource with largest amount in bucket (for load appearance). */
+  function _dominantBucketResource(bucket) {
+    if (!bucket || typeof bucket !== 'object') return null;
+    let best = null;
+    let bestAmt = 0;
+    for (const [k, v] of Object.entries(bucket)) {
+      const a = Number(v) || 0;
+      if (a > bestAmt) {
+        bestAmt = a;
+        best = k;
+      }
+    }
+    return bestAmt > 0 ? best : null;
+  }
+
+  /** Barrow tub fill: color (and slight shape hints) by material — not one generic “green goo”. */
+  const BUCKET_LOAD_VISUAL = {
+    stone: { color: 0x6a6e78, opacity: 0.94 },
+    gravel: { color: 0x9a958c, opacity: 0.92 },
+    clay: { color: 0xa07860, opacity: 0.9 },
+    dirt: { color: 0x5a4030, opacity: 0.9 },
+    topsoil: { color: 0x4a3828, opacity: 0.88 },
+    wood: { color: 0x5c3d22, opacity: 0.9 },
+    wheat: { color: 0xd4a838, opacity: 0.93 },
+    compost: { color: 0x3d2818, opacity: 0.88 },
+    manure: { color: 0x2a1c12, opacity: 0.92 },
+    fertilizer: { color: 0xc8d0d8, opacity: 0.85 },
+  };
+
   function _wildMesh(node) {
     const g = new THREE.Group();
     const { x, z } = _worldXZ(node.x, node.y);
@@ -1125,13 +1191,7 @@ ${sdRoundBoxFn}`,
         break;
       }
       case 'gravel': {
-        const m = new THREE.Mesh(
-          new THREE.IcosahedronGeometry(10, 0),
-          new THREE.MeshLambertMaterial({ color: 0x909088 }),
-        );
-        m.position.y = 9;
-        m.castShadow = true;
-        g.add(m);
+        _wildGravelPile(g, node);
         break;
       }
       case 'clay': {
@@ -1418,11 +1478,12 @@ ${sdRoundBoxFn}`,
    * Classic single-wheel barrow (+Z forward): two straight wood rails in a V (narrow at axle, wide at
    * handles), open bucket on top, metal legs, wheel + axle — minimal parts.
    */
-  function _wheelbarrow3d(grp, colorHex, flatTire, loadFrac, facingOrAngle, label) {
+  function _wheelbarrow3d(grp, colorHex, flatTire, loadFrac, facingOrAngle, label, loadResourceType) {
     const yaw = _yawFromFacingOrAngle(facingOrAngle);
     const yawKey = (Math.round(yaw * 48) / 48).toFixed(4);
     const loadKey = (Math.round(loadFrac * 24) / 24).toFixed(3);
-    const cacheKey = `${yawKey}|${flatTire ? 1 : 0}|${loadKey}|${colorHex}`;
+    const loadMatKey = loadFrac > 0.02 ? (loadResourceType || 'unknown') : '-';
+    const cacheKey = `${yawKey}|${flatTire ? 1 : 0}|${loadKey}|${colorHex}|${loadMatKey}`;
     if (grp.userData._wbCacheKey === cacheKey) {
       grp.rotation.y = yaw;
       if (label && grp.userData.wx != null) {
@@ -1555,9 +1616,18 @@ ${sdRoundBoxFn}`,
     grp.add(legBrace);
 
     if (loadFrac > 0.02) {
+      const vis = (loadResourceType && BUCKET_LOAD_VISUAL[loadResourceType])
+        ? BUCKET_LOAD_VISUAL[loadResourceType]
+        : { color: 0x7a8a68, opacity: 0.88 };
+      const hScale = loadResourceType === 'wheat' ? 0.85 : 1;
+      const zScale = loadResourceType === 'wheat' ? 1.08 : 1;
       const load = new THREE.Mesh(
-        new THREE.BoxGeometry(tubW - 4, 6 * loadFrac, tubD - 7),
-        new THREE.MeshLambertMaterial({ color: 0x88d050, transparent: true, opacity: 0.88 }),
+        new THREE.BoxGeometry(tubW - 4, 6 * loadFrac * hScale, (tubD - 7) * zScale),
+        new THREE.MeshLambertMaterial({
+          color: vis.color,
+          transparent: true,
+          opacity: vis.opacity,
+        }),
       );
       load.position.set(0, 15.5 + 2.8 * loadFrac, tz - 1);
       grp.add(load);
@@ -1595,7 +1665,7 @@ ${sdRoundBoxFn}`,
       grp.userData.wx = x;
       grp.userData.wz = z;
       const orient = p.angle != null && Number.isFinite(p.angle) ? p.angle : face;
-      _wheelbarrow3d(grp, '#6ab0e8', p.flat_tire, 0, orient, p.username || '');
+      _wheelbarrow3d(grp, '#6ab0e8', p.flat_tire, 0, orient, p.username || '', null);
       grp.visible = true;
     }
     if (s.player) {
@@ -1604,6 +1674,7 @@ ${sdRoundBoxFn}`,
       const bucket = s.player.bucket || {};
       const total = Object.values(bucket).reduce((a, b) => a + b, 0);
       const cap = s.player.bucket_cap_effective != null ? s.player.bucket_cap_effective : (s.player.bucket_cap || 10);
+      const dominant = _dominantBucketResource(bucket);
       const face = s.facing || 'down';
       const grp = _ensureWb(wbPoolUsed++);
       const { x, z } = _worldXZ(plx, ply);
@@ -1613,7 +1684,15 @@ ${sdRoundBoxFn}`,
       grp.userData.wx = x;
       grp.userData.wz = z;
       const orient = s.player.angle != null && Number.isFinite(s.player.angle) ? s.player.angle : face;
-      _wheelbarrow3d(grp, '#f5c842', s.player.flat_tire, Math.min(1, total / cap), orient, null);
+      _wheelbarrow3d(
+        grp,
+        '#f5c842',
+        s.player.flat_tire,
+        Math.min(1, total / cap),
+        orient,
+        null,
+        dominant,
+      );
       grp.visible = true;
     }
     for (let i = wbPoolUsed; i < wbPool.length; i++) wbPool[i].visible = false;

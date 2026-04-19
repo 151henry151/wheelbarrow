@@ -10,6 +10,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **Docs** (`docs/ENGINE-TICK-AND-PERSIST.md`): Document why `tick()` must not block on full DB persist (asyncio/event-loop movement freeze; relation to v0.12.71 / v0.12.73); **Cursor** (`.cursor/rules/engine-tick-persist.mdc`)
 
+## [0.12.74] - 2026-04-16
+
+### Changed
+- **Client** (`client/js/renderer.js`): Draw wild **gravel** nodes as a pile of small rocks instead of a single icosahedron (clearer contrast with **stone** nodes).
+- **Client** (`client/js/renderer.js`): Tint the wheelbarrow tub **load** by the **dominant** bucket material (largest amount); mixed loads use that material’s color instead of a single green fill.
+
 ## [0.12.73] - 2026-04-19
 
 ### Fixed
