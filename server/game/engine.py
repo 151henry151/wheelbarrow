@@ -185,6 +185,8 @@ class GameEngine:
         self._last_persist       = time.monotonic()
         self._last_market_drift  = time.monotonic()
         self._last_election_check = time.monotonic()
+        # Persist runs as a background task so tick() returns quickly for movement integration.
+        self._persist_task: asyncio.Task | None = None
         # Cached tile set for movement collision; invalidate when structures/piles change.
         self._movement_blocked_cache: set[tuple[int, int]] | None = None
         # Wild nodes are static after load — chunk id -> list of node ids for viewport culling.
@@ -2038,6 +2040,8 @@ class GameEngine:
     async def tick(self, resource_tick_s: int, persist_interval_s: int):
         now = time.monotonic()
         dt = settings.game_tick_ms / 1000.0
+
+        _t = time.monotonic()
         blocked_movement = self._movement_blocked_tiles()
         for pid in list(self.sockets.keys()):
             pl = self.players.get(pid)
@@ -2050,6 +2054,7 @@ class GameEngine:
                 self._dispatch_wb_move_events(pid, ev)
             except Exception:
                 logging.exception("integrate_player_movement")
+        _move_ms = (time.monotonic() - _t) * 1000
 
         prev_season = self.season.season
         if self.season.tick():
@@ -2062,12 +2067,14 @@ class GameEngine:
                 await self._grow_roads_new_year()
             await self._broadcast_all({"type": "season_change", "season": self.season.wire()})
 
+        _t = time.monotonic()
         if now - self._last_resource_tick >= resource_tick_s:
             elapsed = now - self._last_resource_tick
             self._last_resource_tick = now
             # Avoid extreme catch-up if the process was busy or timers were skewed.
             elapsed = min(elapsed, 120.0)
             await self._do_resource_tick(elapsed)
+        _rtick_ms = (time.monotonic() - _t) * 1000
 
         if now - self._last_market_drift >= MARKET_DRIFT_INTERVAL:
             self._last_market_drift = now
@@ -2078,19 +2085,48 @@ class GameEngine:
             self._last_election_check = now
             await self._do_election_check()
 
+        _t = time.monotonic()
         await self._broadcast_state()
+        _bcast_ms = (time.monotonic() - _t) * 1000
+
+        if _move_ms + _rtick_ms + _bcast_ms > 150:
+            logger.warning(
+                "wheelbarrow: tick sections move=%.1fms rtick=%.1fms bcast=%.1fms",
+                _move_ms, _rtick_ms, _bcast_ms,
+            )
 
         if now - self._last_persist >= persist_interval_s:
             self._last_persist = now
-            for p in self.players.values():
-                if p["id"] in self.sockets:
-                    await queries.save_player(p)
-            for n in self.nodes.values():
+            # Run persist in the background so tick() returns immediately — keeping movement
+            # integration on its 100ms cadence. Without this, 500 nodes × 2-5ms/save = 1-5s
+            # stall inside tick(), which freezes the wheelbarrow for each persist cycle.
+            if self._persist_task is None or self._persist_task.done():
+                self._persist_task = asyncio.create_task(self._do_persist())
+            else:
+                logger.warning("wheelbarrow: skipping persist — previous persist still running")
+
+    async def _do_persist(self):
+        """Persist all live state to DB. Runs as a background task to avoid stalling tick()."""
+        _t0 = time.monotonic()
+        try:
+            players_to_save = [p for p in self.players.values() if p["id"] in self.sockets]
+            for p in players_to_save:
+                await queries.save_player(p)
+            nodes_to_save = list(self.nodes.values())
+            for n in nodes_to_save:
                 await queries.save_node(n)
-            for s in self.structures.values():
+            structs_to_save = list(self.structures.values())
+            for s in structs_to_save:
                 await queries.save_structure(s)
-            for t in self.towns.values():
+            towns_to_save = list(self.towns.values())
+            for t in towns_to_save:
                 await queries.update_town(t)
+        except Exception:
+            logger.exception("wheelbarrow: background persist failed")
+        finally:
+            dt = time.monotonic() - _t0
+            if dt > 1.0:
+                logger.warning("wheelbarrow: persist took %.2fs (%d nodes)", dt, len(self.nodes))
 
     async def _do_resource_tick(self, elapsed: float):
         all_nodes = {**self.nodes, **self.structures}

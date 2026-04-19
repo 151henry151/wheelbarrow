@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.60] - 2026-04-18
+
+### Fixed
+- **Server** (`server/game/engine.py`): Move DB persist out of `tick()` into a background `asyncio.Task` — previously, saving all nodes/structures/towns sequentially inside `tick()` held the coroutine for 1–5 seconds, blocking `integrate_player_movement` from running on its 100ms cadence even though each individual `await` yielded (because `run_game_loop` cannot re-enter `tick()` while `tick()` is still awaiting). This is the root cause of the periodic ~5s movement freezes. Persist now fires as `asyncio.create_task(self._do_persist())` and `tick()` returns immediately. Overlapping persists (if one hasn't finished by the next interval) are skipped with a warning log.
+- **Server** (`server/game/engine.py`): Add per-section wall-clock logging inside `tick()` (move, resource-tick, broadcast) — logs a warning when any combination exceeds 150 ms so future regressions are visible in Docker logs without needing a profiler.
+
 ## [0.12.59] - 2026-04-16
 
 ### Fixed
