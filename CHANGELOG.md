@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.62] - 2026-04-18
+
+### Fixed
+- **Server** (`server/game/engine.py`): Intra-town road paths now include the town center as a BFS site, so they connect to inter-town roads that terminate at the center. Previously there was a gap between the two road networks.
+- **Server** (`server/game/world_gen.py`): Resource nodes are now inserted after inter-town roads are generated; any node whose tile falls on a road is filtered out before insertion. Previously nodes could appear on top of road tiles.
+- **Server** (`server/game/world_gen.py`): Call `extra_ponds_outside_spawn_ring` during fresh world generation so ponds appear near spawn. Previously the function was only used as a migration helper and new worlds had no visible water close to the player start.
+- **Client** (`client/js/renderer.js`): Replace flat instanced-plane road tiles with a terrain-hugging `BufferGeometry` mesh. Each tile now has four corner vertices sampled at `Terrain.worldYFloat(tx±0.5, ty±0.5)`, eliminating the staircase effect at elevation changes and the disappearing-road artifact at low camera pitch. Road material uses `THREE.DoubleSide` so the mesh is visible from any angle.
+
 ## [0.12.61] - 2026-04-18
 
 ### Changed

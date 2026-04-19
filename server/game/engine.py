@@ -363,6 +363,10 @@ class GameEngine:
                 v = d.get(k)
                 if v and len(v) >= 2:
                     sites.append((int(v[0]), int(v[1])))
+            # Include town center so intra-town paths connect to inter-town roads
+            tc = (int(town.get("center_x", 0)), int(town.get("center_y", 0)))
+            if tc != (0, 0) and tc not in sites:
+                sites.append(tc)
             if len(sites) < 2:
                 continue
             desired |= path_union_for_sites(poly, sites, set())

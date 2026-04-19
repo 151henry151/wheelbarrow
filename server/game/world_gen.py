@@ -19,7 +19,9 @@ from server.game.constants import (
     PLAYER_SPAWN,
 )
 from server.game.town_npcs import place_npc_district
-from server.game.terrain_features import generate_water_features, generate_poor_soil_for_parcels
+from server.game.terrain_features import (
+    generate_water_features, generate_poor_soil_for_parcels, extra_ponds_outside_spawn_ring,
+)
 from server.game.intertown_roads import plan_intertown_roads
 from server.db import queries
 
@@ -627,12 +629,14 @@ async def generate_world_if_needed():
     parcels  = _generate_parcels(rng, towns, nodes)
 
     town_ids = await queries.insert_towns_bulk(towns)
-    await queries.insert_nodes_bulk(nodes)
     await queries.insert_parcels_bulk(parcels, town_ids)
 
     await queries.ensure_terrain_tables()
     node_pos = {(n["x"], n["y"]) for n in nodes}
     water = generate_water_features(rng, node_pos, towns)
+    # Extra ponds visible near spawn (outside the spawn-exclusion ring)
+    spawn_ponds = extra_ponds_outside_spawn_ring(rng, water, node_pos, towns)
+    water |= spawn_ponds
     await queries.insert_water_tiles_bulk(water)
 
     road_net, bridge_for_roads, water_remove = plan_intertown_roads(rng, towns, set(water))
@@ -643,12 +647,18 @@ async def generate_world_if_needed():
     if road_net:
         await queries.insert_road_bulk(list(road_net), protected=1)
 
+    # Insert nodes after roads so we can filter any that landed on road tiles
+    road_tiles = set(road_net)
+    nodes = [n for n in nodes if (n["x"], n["y"]) not in road_tiles]
+    await queries.insert_nodes_bulk(nodes)
+
     poor = generate_poor_soil_for_parcels(rng, parcels)
     await queries.insert_poor_soil_bulk(poor)
 
     await queries.mark_world_generated()
     print(
         f"[world_gen] Done. {len(towns)} towns, {len(nodes)} nodes, {len(parcels)} parcels, "
-        f"{len(water)} water tiles (ponds, streams, major rivers), {len(road_net)} inter-town road tiles, "
-        f"{len(bridge_for_roads)} road bridges, {len(poor)} poor-soil tiles.",
+        f"{len(water)} water tiles (ponds+spawn ponds, streams, major rivers), "
+        f"{len(road_net)} inter-town road tiles, {len(bridge_for_roads)} road bridges, "
+        f"{len(poor)} poor-soil tiles.",
     )

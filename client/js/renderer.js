@@ -5,8 +5,6 @@
 /* global THREE, Terrain */
 const Renderer = (() => {
   const T = 32;
-  /** Road planes extend past tile edges (tile pitch is {@link T}) so cardinally-adjacent paths read as one ribbon. */
-  const ROAD_TILE_OVERLAP = 14;
   /** Rebuilding the terrain mesh every frame tanked FPS; grass follows this cadence while the camera stays smooth. */
   const GRASS_REBUILD_MS = 110;
   /** Water plane is larger than a tile so shader can draw fillets past |p|=1 onto grass. */
@@ -57,6 +55,13 @@ const Renderer = (() => {
   let roadMesh;
   let roadMat;
   const MAX_ROAD = 12000;
+  let _roadPosArr;
+  let _roadNrmArr;
+  let _roadIdxArr;
+  let _roadPosAttr;
+  let _roadNrmAttr;
+  let _roadIdxAttr;
+  let _roadGeo;
   let dynamicRoot;
   let overlayRoot;
 
@@ -354,17 +359,31 @@ ${sdRoundBoxFn}`,
     waterMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     groundGroup.add(waterMesh);
 
-    // Flat dirt ribbon (XZ plane) — reads as a path, not a tall block on every tile.
-    const roadGeo = new THREE.PlaneGeometry(T + ROAD_TILE_OVERLAP, T + ROAD_TILE_OVERLAP);
-    roadMat = new THREE.MeshLambertMaterial({ color: 0x5c4334, emissive: 0x120c08, emissiveIntensity: 0.35 });
+    // Terrain-hugging road mesh — 4 corner verts per tile, heights from Terrain.worldYFloat.
+    // DoubleSide so the road doesn't vanish at low camera pitch; no staircase at elevation changes.
+    _roadPosArr = new Float32Array(MAX_ROAD * 4 * 3);
+    _roadNrmArr = new Float32Array(MAX_ROAD * 4 * 3);
+    for (let i = 1; i < MAX_ROAD * 4 * 3; i += 3) _roadNrmArr[i] = 1; // up-facing normals
+    _roadIdxArr = new Uint32Array(MAX_ROAD * 6);
+    _roadPosAttr = new THREE.BufferAttribute(_roadPosArr, 3);
+    _roadPosAttr.setUsage(THREE.DynamicDrawUsage);
+    _roadNrmAttr = new THREE.BufferAttribute(_roadNrmArr, 3);
+    _roadIdxAttr = new THREE.BufferAttribute(_roadIdxArr, 1);
+    _roadGeo = new THREE.BufferGeometry();
+    _roadGeo.setAttribute('position', _roadPosAttr);
+    _roadGeo.setAttribute('normal', _roadNrmAttr);
+    _roadGeo.setIndex(_roadIdxAttr);
+    roadMat = new THREE.MeshLambertMaterial({
+      color: 0x5c4334, emissive: 0x120c08, emissiveIntensity: 0.35,
+      side: THREE.DoubleSide,
+    });
     roadMat.polygonOffset = true;
     roadMat.polygonOffsetFactor = -1;
     roadMat.polygonOffsetUnits = -3;
-    roadMesh = new THREE.InstancedMesh(roadGeo, roadMat, MAX_ROAD);
+    roadMesh = new THREE.Mesh(_roadGeo, roadMat);
     roadMesh.receiveShadow = true;
     roadMesh.castShadow = false;
     roadMesh.renderOrder = 1;
-    roadMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     groundGroup.add(roadMesh);
 
     dynamicRoot = new THREE.Group();
@@ -773,15 +792,28 @@ ${sdRoundBoxFn}`,
       wi += 1;
     };
     const bridgeSet = new Set((s.bridge_tiles || []).map((b) => `${b.x},${b.y}`));
+    const R_OFF = 0.62;
     const pushR = (tx, ty) => {
       if (ri >= MAX_ROAD) return;
       if (bridgeSet.has(`${tx},${ty}`)) return;
-      const { x, z } = _worldXZ(tx, ty);
-      _dummy.position.set(x, _groundY(tx, ty) + 0.62, z);
-      _dummy.rotation.set(-Math.PI / 2, 0, 0);
-      _dummy.scale.set(1, 1, 1);
-      _dummy.updateMatrix();
-      roadMesh.setMatrixAt(ri++, _dummy.matrix);
+      const x0 = tx * T;
+      const x1 = tx * T + T;
+      const z0 = ty * T;
+      const z1 = ty * T + T;
+      const yNW = _groundY(tx - 0.5, ty - 0.5) + R_OFF;
+      const yNE = _groundY(tx + 0.5, ty - 0.5) + R_OFF;
+      const ySW = _groundY(tx - 0.5, ty + 0.5) + R_OFF;
+      const ySE = _groundY(tx + 0.5, ty + 0.5) + R_OFF;
+      const vBase = ri * 4;
+      const p = vBase * 3;
+      _roadPosArr[p + 0] = x0; _roadPosArr[p + 1] = yNW; _roadPosArr[p + 2] = z0;
+      _roadPosArr[p + 3] = x1; _roadPosArr[p + 4] = yNE; _roadPosArr[p + 5] = z0;
+      _roadPosArr[p + 6] = x0; _roadPosArr[p + 7] = ySW; _roadPosArr[p + 8] = z1;
+      _roadPosArr[p + 9] = x1; _roadPosArr[p + 10] = ySE; _roadPosArr[p + 11] = z1;
+      const idx = ri * 6;
+      _roadIdxArr[idx + 0] = vBase;     _roadIdxArr[idx + 1] = vBase + 1; _roadIdxArr[idx + 2] = vBase + 2;
+      _roadIdxArr[idx + 3] = vBase + 1; _roadIdxArr[idx + 4] = vBase + 3; _roadIdxArr[idx + 5] = vBase + 2;
+      ri += 1;
     };
     for (const w of s.water_tiles || []) {
       if (w.x < sx - 1 || w.x > ex + 1 || w.y < sy - 1 || w.y > ey + 1) continue;
@@ -792,11 +824,12 @@ ${sdRoundBoxFn}`,
       pushR(r.x, r.y);
     }
     waterMesh.count = wi;
-    roadMesh.count = ri;
     waterMesh.instanceMatrix.needsUpdate = true;
     waterRAttr.needsUpdate = true;
     waterFilletAttr.needsUpdate = true;
-    roadMesh.instanceMatrix.needsUpdate = true;
+    _roadGeo.setDrawRange(0, ri * 6);
+    _roadPosAttr.needsUpdate = true;
+    _roadIdxAttr.needsUpdate = true;
   }
 
   function _soilFurrows(sx, sy, ex, ey) {
