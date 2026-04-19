@@ -146,8 +146,8 @@ def generate_major_rivers(
     def ok_river_tile(tx: int, ty: int) -> bool:
         if not (8 <= tx < WORLD_W - 8 and 8 <= ty < WORLD_H - 8):
             return False
-        if abs(tx - sx) <= SPAWN_WATER_EXCLUSION and abs(ty - sy) <= SPAWN_WATER_EXCLUSION:
-            return False
+        # Rivers are natural features that flow through the whole world — no spawn exclusion.
+        # (Ponds/streams still keep SPAWN_WATER_EXCLUSION so the immediate start area is dry.)
         if (tx, ty) in node_positions or (tx, ty) in blocked:
             return False
         if _too_close_to_npc_shops(tx, ty, towns):

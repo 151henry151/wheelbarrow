@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.63] - 2026-04-18
+
+### Fixed
+- **Client** (`client/js/renderer.js`): Water tiles now render at the maximum of their four terrain corner heights (instead of the tile-center height). This prevents the surrounding grass mesh from bleeding through pond/river surfaces at tile seams, eliminating the visible grid/segmentation effect on ponds.
+- **Server** (`server/game/terrain_features.py`): Major rivers no longer skip the spawn-area exclusion zone. Rivers are world-spanning natural features and should flow through the whole map including the player start area; only ponds and streams keep the 30-tile spawn dry zone.
+
 ## [0.12.62] - 2026-04-18
 
 ### Fixed

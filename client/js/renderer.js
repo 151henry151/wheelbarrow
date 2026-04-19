@@ -727,7 +727,15 @@ ${sdRoundBoxFn}`,
     const pushW = (tx, ty) => {
       if (wi >= MAX_WATER) return;
       const { x, z } = _worldXZ(tx, ty);
-      _dummy.position.set(x, _groundY(tx, ty) + 0.35, z);
+      // Raise each tile to the max of its 4 terrain corners so the quad always sits
+      // above surrounding grass — prevents grass from bleeding through pond/river seams.
+      const waterY = Math.max(
+        _groundY(tx - 0.5, ty - 0.5),
+        _groundY(tx + 0.5, ty - 0.5),
+        _groundY(tx - 0.5, ty + 0.5),
+        _groundY(tx + 0.5, ty + 0.5),
+      ) + 0.35;
+      _dummy.position.set(x, waterY, z);
       _dummy.rotation.set(0, 0, 0);
       _dummy.scale.set(1, 1, 1);
       _dummy.updateMatrix();
