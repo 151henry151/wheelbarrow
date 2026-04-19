@@ -160,6 +160,7 @@ class GameEngine:
         # Latest tick only (maxsize=1 in main.py) — unbounded out_q + 10Hz ticks can backlog if
         # send_json lags, matching multi-second "stuck until queue drains" movement stalls.
         self.tick_queues: dict[int, asyncio.Queue] = {}
+        self._chat_cooldown: dict[int, float] = {}  # monotonic — limit chat spam
         self.tokens:     dict[str, int]      = {}
         self.nodes:      dict[int, dict]     = {}    # resource nodes
         self.structures: dict[int, dict]     = {}    # player structures
@@ -189,7 +190,6 @@ class GameEngine:
         self._last_persist       = time.monotonic()
         self._last_market_drift  = time.monotonic()
         self._last_election_check = time.monotonic()
-        self._persist_task: asyncio.Task | None = None
         # Cached tile set for movement collision; invalidate when structures/piles change.
         self._movement_blocked_cache: set[tuple[int, int]] | None = None
         # Wild nodes are static after load — chunk id -> list of node ids for viewport culling.
@@ -772,6 +772,7 @@ class GameEngine:
         self.sockets.pop(player_id, None)
         self.out_queues.pop(player_id, None)
         self.tick_queues.pop(player_id, None)
+        self._chat_cooldown.pop(player_id, None)
         player = self.players.get(player_id)
         if player:
             await queries.save_player(player)
@@ -929,6 +930,29 @@ class GameEngine:
             if not d and pl:
                 d = angle_to_cardinal_dir(float(pl.get("angle", 0)))
             await self._bridge_deposit(player_id, d)
+        elif t == "chat":
+            await self._chat_broadcast(player_id, msg)
+
+    async def _chat_broadcast(self, player_id: int, msg: dict) -> None:
+        """Global chat: one line, all connected clients; rate-limited per sender."""
+        raw = msg.get("text")
+        if not isinstance(raw, str):
+            return
+        text = " ".join(raw.split())
+        if not text:
+            return
+        if len(text) > 200:
+            text = text[:200]
+        pl = self.players.get(player_id)
+        if not pl:
+            return
+        now = time.monotonic()
+        last = self._chat_cooldown.get(player_id, 0.0)
+        if now - last < 0.75:
+            return
+        self._chat_cooldown[player_id] = now
+        name = str(pl.get("username") or "?")[:32]
+        await self._broadcast_all({"type": "chat", "from": name, "text": text})
 
     # ---- movement (continuous; integrate_player_movement in tick) ----------
 
@@ -2187,25 +2211,15 @@ class GameEngine:
 
         if now - self._last_persist >= persist_interval_s:
             self._last_persist = now
-            if self._persist_task is None or self._persist_task.done():
-                self._persist_task = asyncio.create_task(self._do_persist())
-            else:
-                logging.warning("wheelbarrow: skipping persist — previous persist still running")
-
-    async def _do_persist(self):
-        """Persist all live state to DB. Runs as a background task to avoid stalling tick()."""
-        try:
-            for p in list(self.players.values()):
+            for p in self.players.values():
                 if p["id"] in self.sockets:
                     await queries.save_player(p)
-            for n in list(self.nodes.values()):
+            for n in self.nodes.values():
                 await queries.save_node(n)
-            for s in list(self.structures.values()):
+            for s in self.structures.values():
                 await queries.save_structure(s)
-            for t in list(self.towns.values()):
+            for t in self.towns.values():
                 await queries.update_town(t)
-        except Exception:
-            logging.exception("wheelbarrow: _do_persist failed")
 
     async def _do_resource_tick(self, elapsed: float):
         all_nodes = {**self.nodes, **self.structures}

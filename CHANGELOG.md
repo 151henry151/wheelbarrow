@@ -10,6 +10,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **Docs** (`docs/ENGINE-TICK-AND-PERSIST.md`): Document why `tick()` must not block on full DB persist (asyncio/event-loop movement freeze; relation to v0.12.71 / v0.12.73); **Cursor** (`.cursor/rules/engine-tick-persist.mdc`)
 
+## [0.12.76] - 2026-04-19
+
+### Added
+- **Global chat**: **[Enter]** opens the composer, **[Enter]** again sends; all connected players receive **`chat`** messages; bottom-left log (**`client/index.html`**, **`client/css/style.css`**, **`client/js/game.js`**, **`client/js/input.js`**).
+- **Server** (`server/game/engine.py`): Handle **`chat`** input; broadcast **`{ type: "chat", from, text }`** to every socket; **0.75s** per-player rate limit; **200** character cap.
+
 ## [0.12.75] - 2026-04-19
 
 ### Changed

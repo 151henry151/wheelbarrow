@@ -514,6 +514,58 @@ function startSellAutopilotFromPile(pile) {
 
 // ---------------------------------------------------------------- notice bar
 let noticeTimer = null;
+const CHAT_LOG_MAX = 80;
+
+function appendChatLine(from, text) {
+  const log = document.getElementById('chat-log');
+  if (!log) return;
+  const row = document.createElement('div');
+  row.className = 'chat-line';
+  const who = document.createElement('span');
+  who.className = 'chat-from';
+  who.textContent = `${from}: `;
+  const body = document.createElement('span');
+  body.className = 'chat-text';
+  body.textContent = text;
+  row.appendChild(who);
+  row.appendChild(body);
+  log.appendChild(row);
+  while (log.children.length > CHAT_LOG_MAX) log.removeChild(log.firstChild);
+  log.scrollTop = log.scrollHeight;
+}
+
+function openChatComposer() {
+  const wrap = document.getElementById('chat-input-wrap');
+  const input = document.getElementById('chat-input');
+  if (!wrap || !input) return;
+  wrap.style.display = 'block';
+  input.value = '';
+  input.focus();
+}
+
+function closeChatComposer() {
+  const wrap = document.getElementById('chat-input-wrap');
+  const input = document.getElementById('chat-input');
+  if (input) input.value = '';
+  if (wrap) wrap.style.display = 'none';
+  const canvas = document.getElementById('game');
+  if (canvas) canvas.focus({ preventScroll: true });
+}
+
+function sendChatMessage() {
+  const input = document.getElementById('chat-input');
+  const wrap = document.getElementById('chat-input-wrap');
+  if (!input || !wrap) return;
+  const text = input.value.trim().slice(0, 200);
+  if (text.length) {
+    WS.send({ type: 'chat', text });
+  }
+  input.value = '';
+  wrap.style.display = 'none';
+  const canvas = document.getElementById('game');
+  if (canvas) canvas.focus({ preventScroll: true });
+}
+
 function showNotice(msg) {
   const bar = document.getElementById('notice-bar');
   bar.textContent = msg;
@@ -643,6 +695,8 @@ function _updateHint() {
   if (state.sellAutopilotActive) {
     hints.push('Autopilot — any key except H stops');
   }
+
+  hints.push('[Enter] chat');
 
   if ((p.wb_handle ?? 100) <= 0) {
     hints.push('Snapped handle — half barrow capacity until you repair at Repair Shop');
@@ -1038,8 +1092,27 @@ function handleKey(key, isRepeat) {
     return;
   }
 
+  const chatInputEl = document.getElementById('chat-input');
+  const chatWrapEl = document.getElementById('chat-input-wrap');
+  if (key === 'Enter' && !isRepeat) {
+    if (state.buildMenuOpen || state.shopMenuOpen || state.pileMenuOpen || state.townMenuOpen) {
+      return;
+    }
+    if (chatInputEl && document.activeElement === chatInputEl) return;
+    if (chatWrapEl && chatWrapEl.style.display !== 'none' && chatInputEl) {
+      chatInputEl.focus();
+      return;
+    }
+    openChatComposer();
+    return;
+  }
+
   // Escape: cancel parcel preview or close menus
   if (key === 'Escape') {
+    if (chatWrapEl && chatWrapEl.style.display !== 'none') {
+      closeChatComposer();
+      return;
+    }
     if (state.parcelPreview !== null) {
       state.parcelPreview = null;
       return;
@@ -1453,6 +1526,26 @@ window.addEventListener('load', () => {
       }
       showNotice(msg.msg);
     });
+
+    WS.on('chat', msg => {
+      const from = typeof msg.from === 'string' ? msg.from : '?';
+      const text = typeof msg.text === 'string' ? msg.text : '';
+      if (!text) return;
+      appendChatLine(from, text);
+    });
+
+    const chatInput = document.getElementById('chat-input');
+    if (chatInput) {
+      chatInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          sendChatMessage();
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          closeChatComposer();
+        }
+      });
+    }
 
     WS.connect(token, null, () => {
       stopSellAutopilot('disconnect');

@@ -194,6 +194,58 @@ canvas#game:active { cursor: grabbing; }
 }
 .pile-sell-all-btn:hover { background: #4a6038; }
 
+/* ------------------------------------------------------------------- Chat */
+#chat-panel {
+  position: fixed;
+  bottom: 12px;
+  left: 12px;
+  width: min(420px, calc(100vw - 24px));
+  max-height: min(220px, 30vh);
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  pointer-events: none;
+}
+#chat-log {
+  overflow-y: auto;
+  max-height: min(168px, 24vh);
+  padding: 6px 10px;
+  background: rgba(0, 0, 0, 0.58);
+  border: 1px solid #444;
+  font-size: 0.76rem;
+  line-height: 1.45;
+  color: #d8d8d8;
+  pointer-events: auto;
+}
+.chat-line {
+  word-break: break-word;
+  margin-bottom: 3px;
+}
+.chat-from {
+  color: #7ab648;
+  font-weight: bold;
+}
+.chat-text {
+  color: #e8e8e8;
+}
+#chat-input-wrap {
+  pointer-events: auto;
+}
+#chat-input {
+  width: 100%;
+  padding: 6px 10px;
+  font-family: monospace;
+  font-size: 0.82rem;
+  background: rgba(12, 12, 12, 0.94);
+  border: 1px solid #7ab648;
+  color: #e8e8e8;
+}
+#chat-input:focus {
+  outline: none;
+  border-color: #a8d868;
+}
+
 /* ----------------------------------------------------------- Notice bar */
 #notice-bar {
   position: fixed;

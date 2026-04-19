@@ -49,6 +49,10 @@ const Input = (() => {
     });
     window.addEventListener('keydown', e => {
       if (e.ctrlKey || e.altKey || e.metaKey) return;
+      const ae = document.activeElement;
+      if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable)) {
+        return;
+      }
       if (_isMoveKey(e.key, e.code)) {
         e.preventDefault();
         if (e.key.startsWith('Arrow')) held[e.key] = true;
@@ -63,6 +67,10 @@ const Input = (() => {
       onKey && onKey(e.key, e.repeat);
     });
     window.addEventListener('keyup', e => {
+      const ae = document.activeElement;
+      if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable)) {
+        return;
+      }
       if (_isMoveKey(e.key, e.code)) {
         if (e.key.startsWith('Arrow')) delete held[e.key];
         else {

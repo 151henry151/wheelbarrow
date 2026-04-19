@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <title>Wheelbarrow</title>
-  <link rel="stylesheet" href="css/style.css?v=0.12.75">
+  <link rel="stylesheet" href="css/style.css?v=0.12.76">
 </head>
 <body>
 
@@ -82,14 +82,21 @@
       <div class="build-menu-close">[Esc] close</div>
     </div>
 
+    <div id="chat-panel" aria-live="polite">
+      <div id="chat-log"></div>
+      <div id="chat-input-wrap" style="display:none">
+        <input type="text" id="chat-input" maxlength="200" placeholder="Type message, Enter to send…" autocomplete="off" />
+      </div>
+    </div>
+
     <div id="notice-bar" style="display:none"></div>
   </div>
 
-  <script src="vendor/three.min.js?v=0.12.75"></script>
-  <script src="js/terrain.js?v=0.12.75"></script>
-  <script src="js/ws.js?v=0.12.75"></script>
-  <script src="js/input.js?v=0.12.75"></script>
-  <script src="js/renderer.js?v=0.12.75"></script>
-  <script src="js/game.js?v=0.12.75"></script>
+  <script src="vendor/three.min.js?v=0.12.76"></script>
+  <script src="js/terrain.js?v=0.12.76"></script>
+  <script src="js/ws.js?v=0.12.76"></script>
+  <script src="js/input.js?v=0.12.76"></script>
+  <script src="js/renderer.js?v=0.12.76"></script>
+  <script src="js/game.js?v=0.12.76"></script>
 </body>
 </html>
