@@ -2090,7 +2090,7 @@ class GameEngine:
         _bcast_ms = (time.monotonic() - _t) * 1000
 
         if _move_ms + _rtick_ms + _bcast_ms > 150:
-            logger.warning(
+            logging.warning(
                 "wheelbarrow: tick sections move=%.1fms rtick=%.1fms bcast=%.1fms",
                 _move_ms, _rtick_ms, _bcast_ms,
             )
@@ -2103,7 +2103,7 @@ class GameEngine:
             if self._persist_task is None or self._persist_task.done():
                 self._persist_task = asyncio.create_task(self._do_persist())
             else:
-                logger.warning("wheelbarrow: skipping persist — previous persist still running")
+                logging.warning("wheelbarrow: skipping persist — previous persist still running")
 
     async def _do_persist(self):
         """Persist all live state to DB. Runs as a background task to avoid stalling tick()."""
@@ -2122,11 +2122,11 @@ class GameEngine:
             for t in towns_to_save:
                 await queries.update_town(t)
         except Exception:
-            logger.exception("wheelbarrow: background persist failed")
+            logging.exception("wheelbarrow: background persist failed")
         finally:
             dt = time.monotonic() - _t0
             if dt > 1.0:
-                logger.warning("wheelbarrow: persist took %.2fs (%d nodes)", dt, len(self.nodes))
+                logging.warning("wheelbarrow: persist took %.2fs (%d nodes)", dt, len(self.nodes))
 
     async def _do_resource_tick(self, elapsed: float):
         all_nodes = {**self.nodes, **self.structures}
