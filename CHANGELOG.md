@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.65] - 2026-04-19
+
+### Fixed
+- **Client** (`client/js/game.js`): **Align** **NPC** **market** **sell** **hint** **with** **server** **`_at_any_npc_market`** **—** **floored** **tile** **coords** **and** **Chebyshev** **distance** **≤** **1** **to** **a** **market** **tile** **(and** **`NPC_MARKET_FALLBACK`** **when** **the** **list** **is** **empty)**
+- **Client** (`client/js/input.js`, `client/js/game.js`, `client/js/renderer.js`): **Snap** **follow-camera** **yaw** **to** **barrow** **heading** **while** **A/D** **or** **left/right** **are** **held;** **keep** **lerp** **when** **not** **turning**
+
 ## [0.12.63] - 2026-04-18
 
 ### Fixed

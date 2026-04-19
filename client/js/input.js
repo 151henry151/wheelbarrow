@@ -162,5 +162,10 @@ const Input = (() => {
     );
   }
 
-  return { init, update, setAutopilotBlocked, clearHeldKeys, isWheelbarrowControlActive };
+  /** A/D or left/right — snap follow camera to barrow while steering. */
+  function isTurnKeyHeld() {
+    return !!(held.ArrowLeft || held.ArrowRight || held.a || held.d);
+  }
+
+  return { init, update, setAutopilotBlocked, clearHeldKeys, isWheelbarrowControlActive, isTurnKeyHeld };
 })();

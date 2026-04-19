@@ -468,8 +468,11 @@ ${sdRoundBoxFn}`,
     ) {
       // Behind wheelbarrow: horizontal offset aligns with −(cos θ, sin θ) in XZ → yaw = atan2(-cos θ, -sin θ)
       const targetYaw = Math.atan2(-Math.cos(s.player.angle), -Math.sin(s.player.angle));
-      // Slightly snappier return when re-engaging control so “behind barrow” reads clearly
-      _camYaw = _lerpAngleRad(_camYaw, targetYaw, 0.32);
+      if (s.cameraTurnKeysHeld) {
+        _camYaw = targetYaw;
+      } else {
+        _camYaw = _lerpAngleRad(_camYaw, targetYaw, 0.32);
+      }
     }
     const cp = Math.cos(_camPitch);
     const sp = Math.sin(_camPitch);
