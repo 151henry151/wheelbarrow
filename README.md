@@ -167,7 +167,7 @@ wheelbarrow/
 └── .env.example
 ```
 
-**Persistence:** Do not run full DB saves inline inside `GameEngine.tick()` — that blocks the asyncio loop and causes periodic movement freezes. Required pattern: `_persist_task` + `asyncio.create_task(self._do_persist())`. See **[`docs/ENGINE-TICK-AND-PERSIST.md`](docs/ENGINE-TICK-AND-PERSIST.md)** (regressions in v0.12.71 and v0.12.76, fixes in v0.12.73 and v0.12.79).
+**Persistence:** Do not run full DB saves inline inside `GameEngine.tick()` — that blocks the asyncio loop and causes periodic movement freezes. Required pattern: `_persist_task` + `asyncio.create_task(self._do_persist())`. See **[`docs/ENGINE-TICK-AND-PERSIST.md`](docs/ENGINE-TICK-AND-PERSIST.md)** (regressions in v0.12.71, v0.12.76, and v0.12.81; fixes in v0.12.73, v0.12.79, and v0.12.82).
 
 ---
 

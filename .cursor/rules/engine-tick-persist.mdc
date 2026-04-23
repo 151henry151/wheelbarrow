@@ -8,7 +8,7 @@ alwaysApply: false
 
 Full-world MariaDB persist **must not** run as a long inline block inside `tick()` only. That blocks asyncio for seconds → **no movement** / periodic freezes aligned with **`persist_interval_s`**.
 
-Regressions: **v0.12.71** (removed background persist), fixed **v0.12.73** (`8b37e22`); **v0.12.76** chat merge (`e04ad31`) accidentally dropped **`_persist_task`** / **`_do_persist()`** again — fixed **v0.12.79** (`7c71ccf`). Original fix **`39fe5d7`**.
+Regressions: **v0.12.71** (removed background persist), fixed **v0.12.73** (`8b37e22`); **v0.12.76** chat merge (`e04ad31`) accidentally dropped **`_persist_task`** / **`_do_persist()`** again — fixed **v0.12.79** (`7c71ccf`); **v0.12.81** (fertilizer / market edits) inlined **`await queries.save_*`** in **`tick()`** again — fixed **v0.12.82**. Original fix **`39fe5d7`**.
 
 **Required:** **`asyncio.create_task(self._do_persist())`** + **`_persist_task`** guard in **`tick()`** — never **`await queries.save_*`** directly in **`tick()`**.
 

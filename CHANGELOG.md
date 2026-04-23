@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.82] - 2026-04-19
+
+### Fixed
+- **Server** (`server/game/engine.py`): Restore **`_persist_task`** / **`_do_persist()`** — **v0.12.81** had inlined **`await queries.save_*`** in **`tick()`**, blocking the asyncio loop on each **`persist_interval_s`** and freezing movement (same class as **v0.12.71** / **v0.12.76**; see **`docs/ENGINE-TICK-AND-PERSIST.md`**).
+
 ## [0.12.81] - 2026-04-19
 
 ### Changed

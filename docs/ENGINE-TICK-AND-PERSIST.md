@@ -38,6 +38,8 @@ This is **not** primarily fixed by reordering WebSocket `move_q` vs `in_q` (thou
 | `8b37e22` (v0.12.73) | **Restore** background `_do_persist` + `_persist_task` guard. |
 | `e04ad31` (v0.12.76) | **Regression:** chat work removed **`_persist_task`** / **`_do_persist()`** and inlined **`await queries.save_*`** inside **`tick()`** → same freeze as v0.12.71. |
 | `7c71ccf` (v0.12.79) | **Restore** background persist (`create_task` + **`_do_persist`**) and guard. |
+| v0.12.81 | **Regression:** fertilizer / market work reintroduced **inline** **`await queries.save_*`** in **`tick()`** (removed **`_persist_task`** / **`_do_persist`**) → same periodic movement freeze. |
+| v0.12.82 | **Restore** background **`_do_persist`** + **`_persist_task`** guard again. |
 
 ## Merge / feature-branch warning
 
