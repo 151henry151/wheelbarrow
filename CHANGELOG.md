@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.87] - 2026-04-24
+
+### Fixed
+- **Client** (`game.js`, `renderer.js`): Simplify owned-land checks back to a direct **bbox + `_sameOwnerId` / `_samePlayerId`** loop over `world_parcels`; removes the multi-path `standing_parcel` fallback chain that was masking the match. Restores: (1) tile highlight when standing on own land, (2) `[F]` farming hints in HUD, (3) F-key till/plant/fertilize/harvest.
+
 ## [0.12.86] - 2026-04-24
 
 ### Fixed

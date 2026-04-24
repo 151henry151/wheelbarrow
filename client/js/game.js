@@ -766,35 +766,21 @@ function _updateHint() {
     hints.push('Winter kills crops in the ground; uncovered wheat piles rot — use a silo or sell.');
   }
 
-  // Prefer server ``standing_parcel`` (parcel_at); merge full row by id so owner_id matches ``_farm`` even if wire fields drift
-  const st = p.standing_parcel;
-  let parcel = _parcelAt(tx, ty);
-  let rowFromStanding = null;
-  if (st && st.id != null && Number.isFinite(Number(st.id))) {
-    rowFromStanding = state.world_parcels.find(pr => Number(pr.id) === Number(st.id));
-    if (rowFromStanding) parcel = rowFromStanding;
-  }
-  const isOwn = (rowFromStanding && _sameOwnerId(rowFromStanding.owner_id, p.id))
-    || (st && _sameOwnerId(st.owner_id, p.id))
-    || (!rowFromStanding && !st && parcel && _sameOwnerId(parcel.owner_id, p.id));
-  const authForUnowned = rowFromStanding || parcel;
-  const unowned = !!(authForUnowned && (authForUnowned.owner_id == null || authForUnowned.owner_id === ''));
-  if (parcel || st) {
+  // Ownership: use integer tile (matches server player_tile_xy) with type-safe comparison
+  const parcel = _parcelAt(tx, ty);
+  const isOwn = parcel != null && _sameOwnerId(parcel.owner_id, p.id);
+  if (parcel) {
     if (isOwn) {
       hints.push('[P] build menu');
-    } else if (unowned && authForUnowned) {
-      if (state.parcelPreview === authForUnowned.id) {
-        hints.push(`[B] confirm purchase: ${authForUnowned.price}c`);
+    } else if (parcel.owner_id == null || parcel.owner_id === '') {
+      if (state.parcelPreview === parcel.id) {
+        hints.push(`[B] confirm purchase: ${parcel.price}c`);
         hints.push('[Esc] cancel');
       } else {
-        hints.push(`[B] preview parcel (${authForUnowned.price}c)`);
+        hints.push(`[B] preview parcel (${parcel.price}c)`);
       }
     } else {
-      const nm = (rowFromStanding && rowFromStanding.owner_name)
-        || (st && st.owner_name)
-        || (parcel && parcel.owner_name)
-        || '?';
-      hints.push(`land: ${nm}`);
+      hints.push(`land: ${parcel.owner_name || '?'}`);
     }
   }
 

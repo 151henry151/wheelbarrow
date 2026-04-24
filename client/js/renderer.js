@@ -984,22 +984,14 @@ ${sdRoundBoxFn}`,
   /** Highlight the tile under the player when it is on land they own (till/plant/soil hints target this tile). */
   function _ownedTileHighlight() {
     if (!s.player || !s.world_parcels || !s.world_parcels.length) return;
-    // Match server ``player_tile_xy`` / ``standing_parcel`` — do not use smoothed rx/ry (can sit on wrong tile vs authority)
     const tx = Math.floor(Number(s.player.x));
     const ty = Math.floor(Number(s.player.y));
-    const st = s.player.standing_parcel;
-    let row = st && st.id != null
-      ? s.world_parcels.find((pr) => Number(pr.id) === Number(st.id))
-      : null;
-    let onOwned = (row && _samePlayerId(row.owner_id, s.player.id))
-      || (st && _samePlayerId(st.owner_id, s.player.id));
-    if (!onOwned) {
-      for (const par of s.world_parcels) {
-        if (!_samePlayerId(par.owner_id, s.player.id)) continue;
-        if (tx >= par.x && tx < par.x + par.w && ty >= par.y && ty < par.y + par.h) {
-          onOwned = true;
-          break;
-        }
+    let onOwned = false;
+    for (const par of s.world_parcels) {
+      if (!_samePlayerId(par.owner_id, s.player.id)) continue;
+      if (tx >= par.x && tx < par.x + par.w && ty >= par.y && ty < par.y + par.h) {
+        onOwned = true;
+        break;
       }
     }
     if (!onOwned) return;
