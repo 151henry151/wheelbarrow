@@ -145,6 +145,14 @@ function _parcelAt(x, y) {
   return null;
 }
 
+/** True if ids refer to the same player (avoids string vs number from JSON). */
+function _sameOwnerId(a, b) {
+  if (a == null || b == null) return false;
+  const na = Number(a);
+  const nb = Number(b);
+  return Number.isFinite(na) && Number.isFinite(nb) && na === nb;
+}
+
 /** Integer tile under the player (matches server `player_tile_xy`). Use for piles, crops, soil, structures on a tile. */
 function _playerTileXY(player) {
   if (!player || !Number.isFinite(player.x) || !Number.isFinite(player.y)) {
@@ -166,7 +174,7 @@ function _pickAdjacentStructure(ptx, pty, cands) {
 /** Active construction site the server uses for deposit/cancel (adjacent tiles + same pick as server). */
 function _constructionSiteForPlayer(tx, ty, playerId) {
   const cands = state.nodes.filter((n) => {
-    if (!n.construction_active || n.owner_id !== playerId) return false;
+    if (!n.construction_active || !_sameOwnerId(n.owner_id, playerId)) return false;
     const nx = Math.floor(Number(n.x));
     const ny = Math.floor(Number(n.y));
     return Math.max(Math.abs(tx - nx), Math.abs(ty - ny)) <= 1;
@@ -250,9 +258,9 @@ function _collectLoadCandidates() {
 
 /** Matches server free pile pickup (priced → owner only; on owner's land → owner only; else public). */
 function _canFreePickPile(pile, player) {
-  if (pile.sell_price != null) return pile.owner_id === player.id;
+  if (pile.sell_price != null) return _sameOwnerId(pile.owner_id, player.id);
   const par = _parcelAt(pile.x, pile.y);
-  if (par && par.owner_id === pile.owner_id) return player.id === pile.owner_id;
+  if (par && _sameOwnerId(par.owner_id, pile.owner_id)) return _sameOwnerId(player.id, pile.owner_id);
   return true;
 }
 
@@ -494,7 +502,7 @@ async function runSellAutopilotLoop(rtype, hx, hy) {
 }
 
 function startSellAutopilotFromPile(pile) {
-  if (state.sellAutopilotActive || !pile || pile.owner_id !== state.player.id) return;
+  if (state.sellAutopilotActive || !pile || !_sameOwnerId(pile.owner_id, state.player.id)) return;
   if (!pile.amount || pile.amount <= 0) return;
 
   state.sellAutopilotActive = true;
@@ -723,7 +731,7 @@ function _updateHint() {
   if (total > 0) {
     hints.push('[U] unload (pile at your feet; wheat → silo if standing on one)');
     const siloHere = state.nodes.find(
-      n => n.is_silo && n.x === tx && n.y === ty && n.owner_id === p.id,
+      n => n.is_silo && n.x === tx && n.y === ty && _sameOwnerId(n.owner_id, p.id),
     );
     if (siloHere && (siloHere.silo_wheat || 0) > 0) {
       hints.push('[O] withdraw wheat from silo to barrow');
@@ -758,9 +766,10 @@ function _updateHint() {
     hints.push('Winter kills crops in the ground; uncovered wheat piles rot — use a silo or sell.');
   }
 
-  const parcel = _parcelAt(px, py);
+  // Use integer tile (matches server parcel_at / player_tile_xy), not float x/y — avoids wrong bbox vs server
+  const parcel = _parcelAt(tx, ty);
   if (parcel) {
-    if (parcel.owner_id === p.id) {
+    if (_sameOwnerId(parcel.owner_id, p.id)) {
       hints.push('[P] build menu');
     } else if (!parcel.owner_id) {
       if (state.parcelPreview === parcel.id) {
@@ -776,8 +785,8 @@ function _updateHint() {
 
   const pilesHere = state.piles.filter(p2 => p2.x === tx && p2.y === ty);
   if (pilesHere.length) {
-    const ownPiles   = pilesHere.filter(p2 => p2.owner_id === p.id);
-    const otherPiles = pilesHere.filter(p2 => p2.owner_id !== p.id && p2.sell_price != null);
+    const ownPiles   = pilesHere.filter(p2 => _sameOwnerId(p2.owner_id, p.id));
+    const otherPiles = pilesHere.filter(p2 => !_sameOwnerId(p2.owner_id, p.id) && p2.sell_price != null);
     if (ownPiles.length)   hints.push('[E] manage pile prices');
     if (otherPiles.length) hints.push('[E] buy from pile');
   }
@@ -838,7 +847,7 @@ function _updateHint() {
       hints.push(crop.ready ? '[F] harvest crop'
         : '[F] fertilize — manure 6 / compost 8 / store fertilizer 10 wheat; unfertilized 5; or check crop');
     }
-  } else if (parcel && parcel.owner_id === p.id) {
+  } else if (parcel && _sameOwnerId(parcel.owner_id, p.id)) {
     if (pilesHere.length) {
       hints.push('Clear resource pile(s) on this tile before [F] till or plant');
     } else if (_poorSoilAt(tx, ty)) {
@@ -863,7 +872,7 @@ function _updateHint() {
   }
 
   const myStructHere = state.nodes.find(
-    n => n.is_structure && !n.construction_active && n.x === tx && n.y === ty && n.owner_id === p.id,
+    n => n.is_structure && !n.construction_active && n.x === tx && n.y === ty && _sameOwnerId(n.owner_id, p.id),
   );
   if (myStructHere && !myStructHere.is_town_hall) {
     hints.push('[K] tear down building (partial material refund to piles)');
@@ -874,7 +883,7 @@ function _updateHint() {
   const parAdj = _parcelAt(adj.x, adj.y);
   if (waterFacing) {
     hints.push(`[J] bridge: pay ${BRIDGE_COIN_COST}c once per tile, then ${BRIDGE_WOOD_REQUIRED} wood total (facing water)`);
-    if ((p.bucket || {}).dirt >= 1 && parAdj && parAdj.owner_id === p.id) {
+    if ((p.bucket || {}).dirt >= 1 && parAdj && _sameOwnerId(parAdj.owner_id, p.id)) {
       hints.push('[L] fill adjacent water with 1 dirt (your land only)');
     }
   }
@@ -972,7 +981,7 @@ function openPileMenu() {
     wrap.className = 'pile-menu-entry';
     const div = document.createElement('div');
     div.className = 'build-option affordable';
-    const isOwn  = pile.owner_id === p.id;
+    const isOwn  = _sameOwnerId(pile.owner_id, p.id);
     const priceStr = pile.sell_price != null ? `${pile.sell_price}c/unit` : 'not for sale';
     if (isOwn) {
       div.innerHTML = `<span class="key">[${i+1}]</span> ${pile.resource_type}: ${pile.amount} — ${priceStr} (set price)`;
@@ -1184,7 +1193,7 @@ function handleKey(key, isRepeat) {
     const pilesHere = state.piles.filter(pl => pl.x === tx && pl.y === ty);
     if (idx < 0 || idx >= pilesHere.length) return;
     const pile = pilesHere[idx];
-    if (pile.owner_id === p.id) {
+    if (_sameOwnerId(pile.owner_id, p.id)) {
       const priceStr = prompt(`Set sell price per unit for ${pile.resource_type} (blank = not for sale):`);
       if (priceStr === null) { closeAllMenus(); return; }
       const price = priceStr.trim() === '' ? null : parseFloat(priceStr);
@@ -1279,13 +1288,14 @@ function handleKey(key, isRepeat) {
 
 function _handleBuyParcel() {
   const p      = state.player;
-  const parcel = _parcelAt(p.x, p.y);
+  const { tx, ty } = _playerTileXY(p);
+  const parcel = _parcelAt(tx, ty);
 
   if (!parcel) {
     showNotice('No parcel here to buy.');
     return;
   }
-  if (parcel.owner_id === p.id) {
+  if (_sameOwnerId(parcel.owner_id, p.id)) {
     showNotice('You already own this parcel.');
     return;
   }

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.83] - 2026-04-24
+
+### Fixed
+- **Server** (`server/game/engine.py`): Coerce **`world_parcels`** **`owner_id`** and session **`player["id"]`** to **`int`** after load/login so **`_farm`** ownership checks match the DB.
+- **Client** (`client/js/game.js`): Resolve parcel at **integer tile** (**`_parcelAt(tx, ty)`**) for HUD (was float **`p.x`/`p.y`**, diverging from **`parcel_at`** / **`player_tile_xy`**); add **`_sameOwnerId`** for **`owner_id`** vs **`p.id`** comparisons (string vs number from JSON).
+
 ## [0.12.82] - 2026-04-19
 
 ### Fixed

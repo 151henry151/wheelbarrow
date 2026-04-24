@@ -250,6 +250,9 @@ class GameEngine:
         # Load parcels and build spatial index
         for p in await queries.load_all_parcels():
             p = dict(p)
+            # aiomysql / JSON can surface owner_id as non-int; strict == fails in _farm vs int player_id
+            if p.get("owner_id") is not None:
+                p["owner_id"] = int(p["owner_id"])
             self.world_parcels[p["id"]] = p
             for dx in range(p["w"]):
                 for dy in range(p["h"]):
@@ -766,6 +769,7 @@ class GameEngine:
         player.setdefault("angle", float(player.get("angle", math.pi / 2)))
         player["_input_fwd"] = 0.0
         player["_input_turn"] = 0.0
+        player["id"] = int(player["id"])
         self.players[player["id"]] = player
         return token
 
