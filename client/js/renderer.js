@@ -933,7 +933,11 @@ ${sdRoundBoxFn}`,
       const ph = p.h * T;
       const cx = ox + pw / 2;
       const cz = oy + ph / 2;
-      const isMine = s.player && _samePlayerId(p.owner_id, s.player.id);
+      const st0 = s.player && s.player.standing_parcel;
+      const isMine = s.player && (
+        _samePlayerId(p.owner_id, s.player.id)
+        || (st0 && Number(p.id) === Number(st0.id) && _samePlayerId(st0.owner_id, s.player.id))
+      );
       const isPreview = s.parcelPreview === p.id;
       const isCurrent = ptx >= p.x && ptx < p.x + p.w && pty >= p.y && pty < p.y + p.h;
       let color = 0x888888;
@@ -982,12 +986,15 @@ ${sdRoundBoxFn}`,
     if (!s.player || !s.world_parcels || !s.world_parcels.length) return;
     const tx = Math.floor(rx);
     const ty = Math.floor(ry);
-    let onOwned = false;
-    for (const par of s.world_parcels) {
-      if (!_samePlayerId(par.owner_id, s.player.id)) continue;
-      if (tx >= par.x && tx < par.x + par.w && ty >= par.y && ty < par.y + par.h) {
-        onOwned = true;
-        break;
+    const st = s.player.standing_parcel;
+    let onOwned = st && _samePlayerId(st.owner_id, s.player.id);
+    if (!onOwned) {
+      for (const par of s.world_parcels) {
+        if (!_samePlayerId(par.owner_id, s.player.id)) continue;
+        if (tx >= par.x && tx < par.x + par.w && ty >= par.y && ty < par.y + par.h) {
+          onOwned = true;
+          break;
+        }
       }
     }
     if (!onOwned) return;

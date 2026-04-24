@@ -766,12 +766,22 @@ function _updateHint() {
     hints.push('Winter kills crops in the ground; uncovered wheat piles rot — use a silo or sell.');
   }
 
-  // Use integer tile (matches server parcel_at / player_tile_xy), not float x/y — avoids wrong bbox vs server
-  const parcel = _parcelAt(tx, ty);
-  if (parcel) {
-    if (_sameOwnerId(parcel.owner_id, p.id)) {
+  // Prefer server ``standing_parcel`` (parcel_at) so HUD matches ``_farm`` when bbox iteration order differs
+  const st = p.standing_parcel;
+  let parcel = _parcelAt(tx, ty);
+  if (st && st.id != null) {
+    const hit = state.world_parcels.find(pr => Number(pr.id) === Number(st.id));
+    if (hit) parcel = hit;
+  }
+  const isOwn = (st && _sameOwnerId(st.owner_id, p.id))
+    || (parcel && _sameOwnerId(parcel.owner_id, p.id));
+  const unowned = st
+    ? (st.owner_id == null || st.owner_id === '')
+    : (parcel && !parcel.owner_id);
+  if (parcel || st) {
+    if (isOwn) {
       hints.push('[P] build menu');
-    } else if (!parcel.owner_id) {
+    } else if (unowned && parcel) {
       if (state.parcelPreview === parcel.id) {
         hints.push(`[B] confirm purchase: ${parcel.price}c`);
         hints.push('[Esc] cancel');
@@ -779,7 +789,8 @@ function _updateHint() {
         hints.push(`[B] preview parcel (${parcel.price}c)`);
       }
     } else {
-      hints.push(`land: ${parcel.owner_name}`);
+      const nm = (st && st.owner_name) || (parcel && parcel.owner_name) || '?';
+      hints.push(`land: ${nm}`);
     }
   }
 
@@ -847,7 +858,7 @@ function _updateHint() {
       hints.push(crop.ready ? '[F] harvest crop'
         : '[F] fertilize — manure 6 / compost 8 / store fertilizer 10 wheat; unfertilized 5; or check crop');
     }
-  } else if (parcel && _sameOwnerId(parcel.owner_id, p.id)) {
+  } else if (isOwn) {
     if (pilesHere.length) {
       hints.push('Clear resource pile(s) on this tile before [F] till or plant');
     } else if (_poorSoilAt(tx, ty)) {
@@ -1450,7 +1461,7 @@ window.addEventListener('load', () => {
       state._prevSelfPos = { x: state.player.x, y: state.player.y };
 
       for (const pl of msg.players) {
-        if (state.player && pl.id === state.player.id) continue;
+        if (state.player && _sameOwnerId(pl.id, state.player.id)) continue;
         if (pl.angle != null && Number.isFinite(pl.angle)) {
           state._otherFacing[pl.id] = _facingFromAngle(pl.angle);
         } else {
@@ -1479,8 +1490,8 @@ window.addEventListener('load', () => {
       if (state.parcelPreview !== null) {
         const pp = state.world_parcels.find(p => p.id === state.parcelPreview);
         if (pp) {
-          const px = state.player.x, py = state.player.y;
-          if (px < pp.x || px >= pp.x + pp.w || py < pp.y || py >= pp.y + pp.h) {
+          const { tx: ptx, ty: pty } = _playerTileXY(state.player);
+          if (ptx < pp.x || ptx >= pp.x + pp.w || pty < pp.y || pty >= pp.y + pp.h) {
             state.parcelPreview = null;
           }
         }

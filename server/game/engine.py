@@ -2568,6 +2568,25 @@ class GameEngine:
 
     # ----------------------------------------------------------------- wires
 
+    def _standing_parcel_wire(self, p: dict) -> dict | None:
+        """Parcel under integer tile (``parcel_at``) — same authority as ``_farm`` / ``_parcel_for_tile``."""
+        tx, ty = player_tile_xy(p)
+        sp = self._parcel_for_tile(tx, ty)
+        if not sp:
+            return None
+        oid = sp.get("owner_id")
+        out_oid = None
+        if oid is not None:
+            try:
+                out_oid = int(oid)
+            except (TypeError, ValueError):
+                out_oid = oid
+        return {
+            "id":         sp["id"],
+            "owner_id":   out_oid,
+            "owner_name": sp.get("owner_name"),
+        }
+
     def _player_wire(self, p: dict) -> dict:
         eff = effective_bucket_cap(p)
         return {
@@ -2587,6 +2606,7 @@ class GameEngine:
             "wb_barrow_level": p.get("wb_barrow_level", 1),
             "collecting_node_id": p.get("_collecting_node_id"),
             "collecting_pile_key": p.get("_collecting_pile_key"),
+            "standing_parcel": self._standing_parcel_wire(p),
         }
 
     def _node_wire(self, n: dict) -> dict:

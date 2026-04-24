@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.85] - 2026-04-24
+
+### Added
+- **Server** (`server/game/engine.py`): **`standing_parcel`** on **`_player_wire`** — **`parcel_at`** tile under the player (same as **`_farm`**).
+
+### Fixed
+- **Client** (`client/js/game.js`, `client/js/renderer.js`): Prefer **`standing_parcel`** for HUD ownership, till/plant hints, and owned-tile highlight; merge full row from **`world_parcels`** by id so UI matches server when parcel bbox list order disagrees with **`parcel_at`**.
+
 ## [0.12.84] - 2026-04-24
 
 ### Fixed
