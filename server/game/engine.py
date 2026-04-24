@@ -73,6 +73,16 @@ def _pile_collect_key(tx: int, ty: int, rtype: str) -> str:
     return f"{tx},{ty},{rtype}"
 
 
+def _ids_equal(a, b) -> bool:
+    """True if a and b are the same numeric id (DB / JSON may yield str vs int)."""
+    if a is None or b is None:
+        return False
+    try:
+        return int(a) == int(b)
+    except (TypeError, ValueError):
+        return False
+
+
 def _crop_harvest_yield(crop: dict, cdef: dict) -> float:
     """Wheat units at harvest; `fertilizer_type` is set when fertilizing (manure / compost / fertilizer)."""
     if not crop.get("fertilized_at"):
@@ -898,6 +908,10 @@ class GameEngine:
     # ---------------------------------------------------------------- input
 
     async def handle_input(self, player_id: int, msg: dict):
+        try:
+            player_id = int(player_id)
+        except (TypeError, ValueError):
+            return
         t = msg.get("type")
         if t == "move":
             pl = self.players.get(player_id)
@@ -1790,7 +1804,7 @@ class GameEngine:
             if not c:
                 continue
             par = self._parcel_for_tile(cx, cy)
-            if par and par.get("owner_id") == player_id:
+            if par and _ids_equal(par.get("owner_id"), player_id):
                 crop = c
                 tx, ty = cx, cy
                 parcel = par
@@ -1806,7 +1820,7 @@ class GameEngine:
                 await self._send(player_id, {"type": "notice",
                     "msg": "The ground is frozen — wait for spring to till away frosted crops."})
                 return
-            if not parcel or parcel.get("owner_id") != player_id:
+            if not parcel or not _ids_equal(parcel.get("owner_id"), player_id):
                 await self._send(player_id, {"type": "notice", "msg": "Not your land."})
                 return
             if self._tile_has_blocking_pile(tx, ty):
@@ -1839,7 +1853,7 @@ class GameEngine:
             if isinstance(ready_at, str):
                 ready_at = datetime.datetime.fromisoformat(ready_at)
             if ready_at <= now_utc:
-                if not parcel or parcel.get("owner_id") != player_id:
+                if not parcel or not _ids_equal(parcel.get("owner_id"), player_id):
                     await self._send(player_id, {"type": "notice", "msg": "Not your land."})
                     return
                 cdef = CROP_DEFS.get(crop["crop_type"], CROP_DEFS["wheat"])
@@ -1923,7 +1937,7 @@ class GameEngine:
         parcel = None
         for cx, cy in _tile_order():
             par = self._parcel_for_tile(cx, cy)
-            if par and par.get("owner_id") == player_id:
+            if par and _ids_equal(par.get("owner_id"), player_id):
                 tx, ty = cx, cy
                 parcel = par
                 break

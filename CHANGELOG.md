@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.84] - 2026-04-24
+
+### Fixed
+- **Server** (`server/game/engine.py`): Add **`_ids_equal`** for **`_farm`** parcel ownership; coerce **`player_id`** with **`int()`** at **`handle_input`** entry (covers str vs int from the WebSocket path).
+- **Client** (`client/js/renderer.js`): Use **`_samePlayerId`** for owned-parcel tint and **`_ownedTileHighlight`**; use **floored tile** (**`ptx`/`pty`**) for parcel overlay “current parcel” tests (align with **`player_tile_xy`**).
+
 ## [0.12.83] - 2026-04-24
 
 ### Fixed

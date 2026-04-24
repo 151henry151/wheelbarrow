@@ -5,6 +5,13 @@
 /* global THREE, Terrain */
 const Renderer = (() => {
   const T = 32;
+  /** Match server / game.js — JSON can mix string and number ids. */
+  function _samePlayerId(a, b) {
+    if (a == null || b == null) return false;
+    const na = Number(a);
+    const nb = Number(b);
+    return Number.isFinite(na) && Number.isFinite(nb) && na === nb;
+  }
   /** Road planes extend past tile edges (tile pitch is {@link T}) so cardinally-adjacent paths read as one ribbon. */
   const ROAD_TILE_OVERLAP = 14;
   /** Rebuilding the terrain mesh every frame tanked FPS; grass follows this cadence while the camera stays smooth. */
@@ -912,11 +919,11 @@ ${sdRoundBoxFn}`,
   }
 
   function _parcels(sx, sy, ex, ey) {
-    const px = s.player ? s.player.x : 0;
-    const py = s.player ? s.player.y : 0;
+    const ptx = s.player && Number.isFinite(s.player.x) ? Math.floor(s.player.x) : 0;
+    const pty = s.player && Number.isFinite(s.player.y) ? Math.floor(s.player.y) : 0;
     for (const p of s.world_parcels || []) {
       if (p.x + p.w < sx - 2 || p.x > ex + 2 || p.y + p.h < sy - 2 || p.y > ey + 2) continue;
-      const onThisParcel = px >= p.x && px < p.x + p.w && py >= p.y && py < p.y + p.h;
+      const onThisParcel = ptx >= p.x && ptx < p.x + p.w && pty >= p.y && pty < p.y + p.h;
       const previewThis = s.parcelPreview === p.id;
       if (!onThisParcel && !previewThis) continue;
 
@@ -926,9 +933,9 @@ ${sdRoundBoxFn}`,
       const ph = p.h * T;
       const cx = ox + pw / 2;
       const cz = oy + ph / 2;
-      const isMine = s.player && p.owner_id === s.player.id;
+      const isMine = s.player && _samePlayerId(p.owner_id, s.player.id);
       const isPreview = s.parcelPreview === p.id;
-      const isCurrent = px >= p.x && px < p.x + p.w && py >= p.y && py < p.y + p.h;
+      const isCurrent = ptx >= p.x && ptx < p.x + p.w && pty >= p.y && pty < p.y + p.h;
       let color = 0x888888;
       let op = 0.06;
       if (isPreview) { color = 0xffdc32; op = 0.2; }
@@ -977,7 +984,7 @@ ${sdRoundBoxFn}`,
     const ty = Math.floor(ry);
     let onOwned = false;
     for (const par of s.world_parcels) {
-      if (par.owner_id !== s.player.id) continue;
+      if (!_samePlayerId(par.owner_id, s.player.id)) continue;
       if (tx >= par.x && tx < par.x + par.w && ty >= par.y && ty < par.y + par.h) {
         onOwned = true;
         break;
@@ -1655,7 +1662,7 @@ ${sdRoundBoxFn}`,
   function _players(sx, sy, ex, ey, smoothX, smoothY) {
     wbPoolUsed = 0;
     for (const p of s.players || []) {
-      if (!p || p.id == null || !s.player || p.id === s.player.id) continue;
+      if (!p || p.id == null || !s.player || _samePlayerId(p.id, s.player.id)) continue;
       if (p.x < sx - 2 || p.x > ex + 2 || p.y < sy - 2 || p.y > ey + 2) continue;
       const face = s._otherFacing[p.id] || 'down';
       const grp = _ensureWb(wbPoolUsed++);
