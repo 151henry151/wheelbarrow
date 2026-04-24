@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.86] - 2026-04-24
+
+### Fixed
+- **Client** (`client/js/renderer.js`): Draw owned-tile highlight using **`floor(player.x/y)`** (same as server **`standing_parcel`**), not smoothed **`rx`/`ry`**; treat as owned when **`world_parcels`** row for **`standing_parcel.id`** matches **id** even if nested **`owner_id`** is wrong.
+- **Client** (`client/js/game.js`): Derive **`isOwn`** / buy / land hints from **`world_parcels`** row looked up by **`standing_parcel.id`** first, then **`standing_parcel.owner_id`**, then bbox fallback — restores **[F]** till/plant hints when wire **`owner_id`** and row disagree.
+
 ## [0.12.85] - 2026-04-24
 
 ### Added

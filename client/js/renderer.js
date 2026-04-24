@@ -982,12 +982,17 @@ ${sdRoundBoxFn}`,
   }
 
   /** Highlight the tile under the player when it is on land they own (till/plant/soil hints target this tile). */
-  function _ownedTileHighlight(rx, ry) {
+  function _ownedTileHighlight() {
     if (!s.player || !s.world_parcels || !s.world_parcels.length) return;
-    const tx = Math.floor(rx);
-    const ty = Math.floor(ry);
+    // Match server ``player_tile_xy`` / ``standing_parcel`` — do not use smoothed rx/ry (can sit on wrong tile vs authority)
+    const tx = Math.floor(Number(s.player.x));
+    const ty = Math.floor(Number(s.player.y));
     const st = s.player.standing_parcel;
-    let onOwned = st && _samePlayerId(st.owner_id, s.player.id);
+    let row = st && st.id != null
+      ? s.world_parcels.find((pr) => Number(pr.id) === Number(st.id))
+      : null;
+    let onOwned = (row && _samePlayerId(row.owner_id, s.player.id))
+      || (st && _samePlayerId(st.owner_id, s.player.id));
     if (!onOwned) {
       for (const par of s.world_parcels) {
         if (!_samePlayerId(par.owner_id, s.player.id)) continue;
@@ -1818,7 +1823,7 @@ ${sdRoundBoxFn}`,
     _bridges(sx, sy, ex, ey);
     _towns();
     _parcels(sx, sy, ex, ey);
-    _ownedTileHighlight(rx, ry);
+    _ownedTileHighlight();
     _nodes(sx, sy, ex, ey);
     _npcMarkers(sx, sy, ex, ey);
     _piles(sx, sy, ex, ey);

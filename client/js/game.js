@@ -766,30 +766,34 @@ function _updateHint() {
     hints.push('Winter kills crops in the ground; uncovered wheat piles rot — use a silo or sell.');
   }
 
-  // Prefer server ``standing_parcel`` (parcel_at) so HUD matches ``_farm`` when bbox iteration order differs
+  // Prefer server ``standing_parcel`` (parcel_at); merge full row by id so owner_id matches ``_farm`` even if wire fields drift
   const st = p.standing_parcel;
   let parcel = _parcelAt(tx, ty);
-  if (st && st.id != null) {
-    const hit = state.world_parcels.find(pr => Number(pr.id) === Number(st.id));
-    if (hit) parcel = hit;
+  let rowFromStanding = null;
+  if (st && st.id != null && Number.isFinite(Number(st.id))) {
+    rowFromStanding = state.world_parcels.find(pr => Number(pr.id) === Number(st.id));
+    if (rowFromStanding) parcel = rowFromStanding;
   }
-  const isOwn = (st && _sameOwnerId(st.owner_id, p.id))
-    || (parcel && _sameOwnerId(parcel.owner_id, p.id));
-  const unowned = st
-    ? (st.owner_id == null || st.owner_id === '')
-    : (parcel && !parcel.owner_id);
+  const isOwn = (rowFromStanding && _sameOwnerId(rowFromStanding.owner_id, p.id))
+    || (st && _sameOwnerId(st.owner_id, p.id))
+    || (!rowFromStanding && !st && parcel && _sameOwnerId(parcel.owner_id, p.id));
+  const authForUnowned = rowFromStanding || parcel;
+  const unowned = !!(authForUnowned && (authForUnowned.owner_id == null || authForUnowned.owner_id === ''));
   if (parcel || st) {
     if (isOwn) {
       hints.push('[P] build menu');
-    } else if (unowned && parcel) {
-      if (state.parcelPreview === parcel.id) {
-        hints.push(`[B] confirm purchase: ${parcel.price}c`);
+    } else if (unowned && authForUnowned) {
+      if (state.parcelPreview === authForUnowned.id) {
+        hints.push(`[B] confirm purchase: ${authForUnowned.price}c`);
         hints.push('[Esc] cancel');
       } else {
-        hints.push(`[B] preview parcel (${parcel.price}c)`);
+        hints.push(`[B] preview parcel (${authForUnowned.price}c)`);
       }
     } else {
-      const nm = (st && st.owner_name) || (parcel && parcel.owner_name) || '?';
+      const nm = (rowFromStanding && rowFromStanding.owner_name)
+        || (st && st.owner_name)
+        || (parcel && parcel.owner_name)
+        || '?';
       hints.push(`land: ${nm}`);
     }
   }
