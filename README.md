@@ -8,6 +8,10 @@ Inspired by the spirit of [A Tractor](https://store.steampowered.com/app/779050/
 
 **Live at:** https://hromp.com/wheelbarrow/
 
+## License
+
+Wheelbarrow is free software: you can redistribute it and/or modify it under the terms of the **GNU General Public License** as published by the Free Software Foundation, **version 3** of the License. See [`LICENSE`](LICENSE) for the full text.
+
 ---
 
 ## Gameplay
@@ -198,4 +202,4 @@ See `wheelbarrow.service` for the service unit template. Deployment is handled m
 
 ## Version
 
-Current version: **0.10.4** (see `VERSION`, `pyproject.toml`, and cache-bust query on scripts in `client/index.html`). See [CHANGELOG.md](CHANGELOG.md).
+Current version: see **`VERSION`** (and cache-bust query strings in **`client/index.html`**). Package metadata in **`pyproject.toml`** may lag; trust **`VERSION`** for releases. See [CHANGELOG.md](CHANGELOG.md).

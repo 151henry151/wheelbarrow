@@ -104,6 +104,8 @@ const state = {
   shopMenuOpen:  false,
   shopType:      null,
   pileMenuOpen:  false,
+  siloMenuOpen:  false,
+  _siloMenuNodeId: null,
   townMenuOpen:  false,
   hudVisible:    false,
   parcelPreview: null,   // parcel id being previewed for purchase, or null
@@ -112,7 +114,9 @@ const state = {
   _townMenuOpts: [],     // ordered option list for town menu
 
   sellAutopilotActive: false,
-  sellAutopilotPile:   null,   // { x, y, resource_type } while running
+  sellAutopilotPile:   null,   // { x, y, resource_type } while running (pile autopilot)
+  sellAutopilotSilo:   null,   // { id, x, y } while silo wheat sell autopilot
+  sellAutopilotKind:   null,   // 'pile' | 'silo' — for completion notice
   /** Set each frame: orbit yaw locked behind barrow while any move/turn key or autopilot */
   cameraFollowDriving: false,
   /** While true + follow-driving: renderer snaps camera yaw to barrow (no lerp lag while steering). */
@@ -335,7 +339,7 @@ function _npcMarketTarget() {
   const markets = state.npc_markets && state.npc_markets.length
     ? state.npc_markets
     : [NPC_MARKET_FALLBACK];
-  const ref = state.sellAutopilotPile || state.player;
+  const ref = state.sellAutopilotSilo || state.sellAutopilotPile || state.player;
   const hx = ref.x != null ? ref.x : state.player.x;
   const hy = ref.y != null ? ref.y : state.player.y;
   let best = markets[0];
@@ -353,6 +357,43 @@ function _npcMarketTarget() {
 
 function _findPileAt(hx, hy, rtype) {
   return state.piles.find(pl => pl.x === hx && pl.y === hy && pl.resource_type === rtype);
+}
+
+/** Stored amounts for UI / autopilot; mirrors server `silo_inventory` when present. */
+function _siloInventoryEntries(node) {
+  if (!node || !node.is_silo) return [];
+  const inv = node.silo_inventory;
+  if (inv && typeof inv === 'object') {
+    return Object.entries(inv)
+      .filter(([, a]) => Number(a) > 0)
+      .map(([rtype, amount]) => ({ rtype, amount: Number(amount) }));
+  }
+  const w = Number(node.silo_wheat || 0);
+  if (w > 0) return [{ rtype: 'wheat', amount: w }];
+  return [];
+}
+
+function _siloWheatAmount(node) {
+  const e = _siloInventoryEntries(node).find(x => x.rtype === 'wheat');
+  return e ? e.amount : 0;
+}
+
+function _siloWithdrawSupportedOnClient(rtype) {
+  return rtype === 'wheat';
+}
+
+/** Own silo within Chebyshev 1 of player tile (same adjacency as server withdraw). */
+function _ownSiloNearPlayer() {
+  const p = state.player;
+  if (!p) return null;
+  const { tx, ty } = _playerTileXY(p);
+  const cands = state.nodes.filter(
+    n => n.is_silo && !n.construction_active && _sameOwnerId(n.owner_id, p.id)
+      && Math.max(Math.abs(n.x - tx), Math.abs(n.y - ty)) <= 1,
+  );
+  if (!cands.length) return null;
+  const onTile = cands.find(n => n.x === tx && n.y === ty);
+  return onTile || cands[0];
 }
 
 function waitNextTick() {
@@ -446,6 +487,68 @@ async function _waitLoadPhase(rtype, hx, hy) {
   return 'abort';
 }
 
+/**
+ * Wait within Chebyshev 1 of silo tile; withdraw wheat until barrow full or silo empty,
+ * or go sell if barrow has cargo and silo is empty.
+ */
+async function _waitSiloLoadPhase(siloId, sx, sy) {
+  while (state.sellAutopilotActive) {
+    const { tx, ty } = _playerTileXY(state.player);
+    const near = Math.max(Math.abs(tx - sx), Math.abs(ty - sy)) <= 1;
+    if (!near) {
+      await _autopilotMoveToTile(sx, sy);
+      continue;
+    }
+    const node = state.nodes.find(n => n.id === siloId && n.is_silo);
+    const pa = _siloWheatAmount(node || {});
+    const ld = _bucketTotalPlayer(state.player);
+    const cap = effectiveBucketCap(state.player);
+    if (pa <= 0 && ld <= 0) {
+      return 'done';
+    }
+    if (ld >= cap - 0.06) {
+      return 'sell';
+    }
+    if (pa <= 0 && ld > 0) {
+      return 'sell';
+    }
+    if (pa > 0 && ld < cap - 0.06 && typeof WS !== 'undefined' && WS.send) {
+      WS.send({ type: 'silo_withdraw' });
+      await waitNextTick();
+      await waitNextTick();
+      continue;
+    }
+    await waitNextTick();
+  }
+  return 'abort';
+}
+
+async function runSellAutopilotLoopFromSilo(siloId, sx, sy) {
+  const market = _npcMarketTarget();
+  while (state.sellAutopilotActive) {
+    await _autopilotMoveToTile(sx, sy);
+    if (!state.sellAutopilotActive) return;
+
+    const phase = await _waitSiloLoadPhase(siloId, sx, sy);
+    if (!state.sellAutopilotActive || phase === 'abort') return;
+    if (phase === 'done') {
+      await _autopilotMoveToTile(sx, sy);
+      return;
+    }
+
+    await _autopilotMoveToTile(market.x, market.y);
+    if (!state.sellAutopilotActive) return;
+
+    const bt = _bucketTotalPlayer(state.player);
+    if (bt <= 0) continue;
+
+    const soldPromise = waitForSoldMessage();
+    WS.send({ type: 'sell' });
+    await soldPromise;
+    if (!state.sellAutopilotActive) return;
+  }
+}
+
 function waitForSoldMessage() {
   return new Promise(resolve => {
     state._soldWaiter = resolve;
@@ -456,13 +559,19 @@ function stopSellAutopilot(reason) {
   if (!state.sellAutopilotActive) return;
   state.sellAutopilotActive = false;
   state.sellAutopilotPile = null;
+  state.sellAutopilotSilo = null;
+  const kind = state.sellAutopilotKind;
+  state.sellAutopilotKind = null;
   if (typeof Input !== 'undefined') {
     Input.setAutopilotBlocked(false);
     Input.clearHeldKeys();
   }
   if (typeof WS !== 'undefined' && WS.send) WS.send({ type: 'move', fwd: 0, turn: 0 });
   const banner = document.getElementById('autopilot-banner');
-  if (banner) banner.style.display = 'none';
+  if (banner) {
+    banner.style.display = 'none';
+    banner.textContent = 'Autopilot: selling to NPC market — any key except H stops';
+  }
   if (state._soldWaiter) {
     const w = state._soldWaiter;
     state._soldWaiter = null;
@@ -471,7 +580,12 @@ function stopSellAutopilot(reason) {
   const tw = state._tickWaiters.splice(0);
   tw.forEach(fn => fn());
   if (reason === 'user') showNotice('Autopilot stopped.');
-  else if (reason === 'complete') showNotice('Autopilot finished — stood by empty pile.');
+  else if (reason === 'complete') {
+    const msg = kind === 'silo'
+      ? 'Autopilot finished — silo empty and nothing left to sell.'
+      : 'Autopilot finished — stood by empty pile.';
+    showNotice(msg);
+  }
   // 'disconnect': silent — connection lost
 }
 
@@ -506,14 +620,47 @@ function startSellAutopilotFromPile(pile) {
   if (!pile.amount || pile.amount <= 0) return;
 
   state.sellAutopilotActive = true;
+  state.sellAutopilotKind = 'pile';
   state.sellAutopilotPile = { x: pile.x, y: pile.y, resource_type: pile.resource_type };
   Input.setAutopilotBlocked(true);
   Input.clearHeldKeys();
   const banner = document.getElementById('autopilot-banner');
-  if (banner) banner.style.display = 'block';
+  if (banner) {
+    banner.textContent = 'Autopilot: selling to NPC market — any key except H stops';
+    banner.style.display = 'block';
+  }
   showNotice('Autopilot — load, NPC market, repeat. Press any key except H to stop.');
 
   runSellAutopilotLoop(pile.resource_type, pile.x, pile.y)
+    .then(() => {
+      if (state.sellAutopilotActive) stopSellAutopilot('complete');
+    })
+    .catch(() => stopSellAutopilot('user'));
+}
+
+function startSellAutopilotFromSilo(siloNode) {
+  if (state.sellAutopilotActive || !siloNode || !_sameOwnerId(siloNode.owner_id, state.player.id)) return;
+  const wSilo = _siloWheatAmount(siloNode);
+  const wBar = Number((state.player.bucket || {}).wheat || 0);
+  if (wSilo <= 0 && wBar <= 0) {
+    showNotice('No wheat in the silo or barrow to sell.');
+    return;
+  }
+
+  state.sellAutopilotActive = true;
+  state.sellAutopilotKind = 'silo';
+  state.sellAutopilotSilo = { id: siloNode.id, x: siloNode.x, y: siloNode.y };
+  state.sellAutopilotPile = null;
+  Input.setAutopilotBlocked(true);
+  Input.clearHeldKeys();
+  const banner = document.getElementById('autopilot-banner');
+  if (banner) {
+    banner.textContent = 'Autopilot: silo ↔ NPC market (wheat) — any key except H stops';
+    banner.style.display = 'block';
+  }
+  showNotice('Autopilot — load wheat from silo, NPC market, repeat. Press any key except H to stop.');
+
+  runSellAutopilotLoopFromSilo(siloNode.id, siloNode.x, siloNode.y)
     .then(() => {
       if (state.sellAutopilotActive) stopSellAutopilot('complete');
     })
@@ -706,7 +853,7 @@ function _updateWbHud() {
 
 function _updateHint() {
   const hint = document.getElementById('hud-hint');
-  if (state.buildMenuOpen || state.shopMenuOpen || state.pileMenuOpen || state.townMenuOpen) {
+  if (state.buildMenuOpen || state.shopMenuOpen || state.pileMenuOpen || state.townMenuOpen || state.siloMenuOpen) {
     hint.textContent = '';
     return;
   }
@@ -730,10 +877,11 @@ function _updateHint() {
   if (atMarket && total > 0) hints.push('[Space] sell all at NPC market');
   if (total > 0) {
     hints.push('[U] unload (pile at your feet; wheat → silo if standing on one)');
-    const siloHere = state.nodes.find(
-      n => n.is_silo && n.x === tx && n.y === ty && _sameOwnerId(n.owner_id, p.id),
+    const siloNear = state.nodes.find(
+      n => n.is_silo && !n.construction_active && _sameOwnerId(n.owner_id, p.id)
+        && Math.max(Math.abs(n.x - tx), Math.abs(n.y - ty)) <= 1,
     );
-    if (siloHere && (siloHere.silo_wheat || 0) > 0) {
+    if (siloNear && _siloWheatAmount(siloNear) > 0) {
       hints.push('[O] withdraw wheat from silo to barrow');
     }
   }
@@ -759,6 +907,9 @@ function _updateHint() {
   const nearShop = state.npc_shops.find(s => Math.abs(s.x - tx) <= 1 && Math.abs(s.y - ty) <= 1);
   if (nearShop) hints.push(`[E] open ${nearShop.label}`);
 
+  const ownSiloNear = _ownSiloNearPlayer();
+  if (ownSiloNear) hints.push('[E] silo (stored grain)');
+
   const nearHall = state.nodes.find(n => n.is_town_hall && Math.abs(n.x - tx) <= 1 && Math.abs(n.y - ty) <= 1);
   if (nearHall) hints.push('[E] town hall');
 
@@ -766,21 +917,35 @@ function _updateHint() {
     hints.push('Winter kills crops in the ground; uncovered wheat piles rot — use a silo or sell.');
   }
 
-  // Ownership: use integer tile (matches server player_tile_xy) with type-safe comparison
-  const parcel = _parcelAt(tx, ty);
-  const isOwn = parcel != null && _sameOwnerId(parcel.owner_id, p.id);
-  if (parcel) {
+  // Prefer server ``standing_parcel`` (parcel_at); merge full row by id so owner_id matches ``_farm`` even if wire fields drift
+  const st = p.standing_parcel;
+  let parcel = _parcelAt(tx, ty);
+  let rowFromStanding = null;
+  if (st && st.id != null && Number.isFinite(Number(st.id))) {
+    rowFromStanding = state.world_parcels.find(pr => Number(pr.id) === Number(st.id));
+    if (rowFromStanding) parcel = rowFromStanding;
+  }
+  const isOwn = (rowFromStanding && _sameOwnerId(rowFromStanding.owner_id, p.id))
+    || (st && _sameOwnerId(st.owner_id, p.id))
+    || (!rowFromStanding && !st && parcel && _sameOwnerId(parcel.owner_id, p.id));
+  const authForUnowned = rowFromStanding || parcel;
+  const unowned = !!(authForUnowned && (authForUnowned.owner_id == null || authForUnowned.owner_id === ''));
+  if (parcel || st) {
     if (isOwn) {
       hints.push('[P] build menu');
-    } else if (parcel.owner_id == null || parcel.owner_id === '') {
-      if (state.parcelPreview === parcel.id) {
-        hints.push(`[B] confirm purchase: ${parcel.price}c`);
+    } else if (unowned && authForUnowned) {
+      if (state.parcelPreview === authForUnowned.id) {
+        hints.push(`[B] confirm purchase: ${authForUnowned.price}c`);
         hints.push('[Esc] cancel');
       } else {
-        hints.push(`[B] preview parcel (${parcel.price}c)`);
+        hints.push(`[B] preview parcel (${authForUnowned.price}c)`);
       }
     } else {
-      hints.push(`land: ${parcel.owner_name || '?'}`);
+      const nm = (rowFromStanding && rowFromStanding.owner_name)
+        || (st && st.owner_name)
+        || (parcel && parcel.owner_name)
+        || '?';
+      hints.push(`land: ${nm}`);
     }
   }
 
@@ -1018,6 +1183,89 @@ function openPileMenu() {
   menu.style.display = 'block';
 }
 
+function _siloMenuOptionList(siloNode) {
+  const opts = [];
+  const entries = _siloInventoryEntries(siloNode);
+  for (const e of entries) {
+    if (_siloWithdrawSupportedOnClient(e.rtype)) opts.push({ action: 'load', rtype: e.rtype });
+  }
+  const wSilo = _siloWheatAmount(siloNode);
+  const wBar = Number((state.player.bucket || {}).wheat || 0);
+  if (wSilo > 0 || wBar > 0) opts.push({ action: 'sell_autopilot' });
+  return opts;
+}
+
+// ------------------------------------------------------------ silo menu
+function openSiloMenu(siloNode) {
+  const p = state.player;
+  if (!siloNode || !p || !_sameOwnerId(siloNode.owner_id, p.id)) return;
+  closeAllMenus();
+  state.siloMenuOpen = true;
+  state._siloMenuNodeId = siloNode.id;
+  const menu  = document.getElementById('silo-menu');
+  const title = document.getElementById('silo-menu-title');
+  const items = document.getElementById('silo-menu-items');
+  items.innerHTML = '';
+  title.textContent = 'Grain silo';
+
+  const cap = siloNode.silo_capacity != null ? siloNode.silo_capacity : '—';
+  const entries = _siloInventoryEntries(siloNode);
+  const info = document.createElement('div');
+  info.style.cssText = 'color:#888;font-size:0.76rem;margin-bottom:8px;line-height:1.4;';
+  info.textContent = entries.length
+    ? `Stored: ${entries.map(e => `${e.rtype} ${e.amount}`).join(' · ')} (capacity ${cap} — more resource types later).`
+    : `Empty (capacity ${cap}). More resource types later.`;
+  items.appendChild(info);
+
+  const opts = _siloMenuOptionList(siloNode);
+  if (!opts.length) {
+    const div = document.createElement('div');
+    div.style.color = '#666';
+    div.style.fontSize = '0.76rem';
+    div.textContent = 'Nothing to load or sell right now.';
+    items.appendChild(div);
+  } else {
+    opts.forEach((opt, i) => {
+      const div = document.createElement('div');
+      div.className = 'build-option affordable';
+      if (opt.action === 'load') {
+        div.innerHTML = `<span class="key">[${i + 1}]</span> Load ${opt.rtype} (fills barrow from silo up to capacity)`;
+      } else {
+        div.innerHTML = `<span class="key">[${i + 1}]</span> Sell all wheat at NPC market (autopilot)…`;
+      }
+      items.appendChild(div);
+    });
+    const sellOpt = opts.find(o => o.action === 'sell_autopilot');
+    if (sellOpt) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'pile-sell-all-btn';
+      btn.textContent = 'Sell all wheat at NPC market…';
+      btn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        if (state.sellAutopilotActive) {
+          showNotice('Autopilot already running.');
+          return;
+        }
+        const node = state.nodes.find(n => n.id === state._siloMenuNodeId);
+        if (!node) return;
+        if (!confirm(
+          'Sell all wheat at NPC market?\n\n'
+          + 'Your wheelbarrow will autopilot: go to this silo and withdraw wheat until your barrow is full, '
+          + 'roll to the NPC market and sell, return to the silo, and repeat until the silo has no wheat '
+          + '(and your barrow is empty). Then you stop at the silo.\n\n'
+          + 'Press any key except H (HUD toggle) to cancel autopilot.',
+        )) return;
+        closeAllMenus();
+        startSellAutopilotFromSilo(node);
+      });
+      items.appendChild(btn);
+    }
+  }
+
+  menu.style.display = 'block';
+}
+
 // ------------------------------------------------------------ town menu
 function openTownMenu(hallNode) {
   closeAllMenus();
@@ -1092,12 +1340,15 @@ function closeAllMenus() {
   state.shopMenuOpen  = false;
   state.shopType      = null;
   state.pileMenuOpen  = false;
+  state.siloMenuOpen  = false;
+  state._siloMenuNodeId = null;
   state.townMenuOpen  = false;
   state._townMenuTown = null;
   state._townMenuOpts = [];
   document.getElementById('build-menu').style.display = 'none';
   document.getElementById('shop-menu').style.display  = 'none';
   document.getElementById('pile-menu').style.display  = 'none';
+  document.getElementById('silo-menu').style.display  = 'none';
   document.getElementById('town-menu').style.display  = 'none';
 }
 
@@ -1120,7 +1371,7 @@ function handleKey(key, isRepeat) {
   const chatInputEl = document.getElementById('chat-input');
   const chatWrapEl = document.getElementById('chat-input-wrap');
   if (key === 'Enter' && !isRepeat) {
-    if (state.buildMenuOpen || state.shopMenuOpen || state.pileMenuOpen || state.townMenuOpen) {
+    if (state.buildMenuOpen || state.shopMenuOpen || state.pileMenuOpen || state.townMenuOpen || state.siloMenuOpen) {
       return;
     }
     if (chatInputEl && document.activeElement === chatInputEl) return;
@@ -1143,6 +1394,39 @@ function handleKey(key, isRepeat) {
       return;
     }
     closeAllMenus();
+    return;
+  }
+
+  // ---- Silo menu ----
+  if (state.siloMenuOpen) {
+    const node = state.nodes.find(n => n.id === state._siloMenuNodeId);
+    if (!node || !node.is_silo) {
+      closeAllMenus();
+      return;
+    }
+    const opts = _siloMenuOptionList(node);
+    const idx = parseInt(key, 10) - 1;
+    if (idx < 0 || idx >= opts.length) return;
+    const opt = opts[idx];
+    if (opt.action === 'load') {
+      if (opt.rtype === 'wheat') WS.send({ type: 'silo_withdraw' });
+      return;
+    }
+    if (opt.action === 'sell_autopilot') {
+      if (state.sellAutopilotActive) {
+        showNotice('Autopilot already running.');
+        return;
+      }
+      if (!confirm(
+        'Sell all wheat at NPC market?\n\n'
+        + 'Your wheelbarrow will autopilot: go to this silo and withdraw wheat until your barrow is full, '
+        + 'roll to the NPC market and sell, return to the silo, and repeat until the silo has no wheat '
+        + '(and your barrow is empty). Then you stop at the silo.\n\n'
+        + 'Press any key except H (HUD toggle) to cancel autopilot.',
+      )) return;
+      closeAllMenus();
+      startSellAutopilotFromSilo(node);
+    }
     return;
   }
 
@@ -1327,6 +1611,9 @@ function _contextInteract() {
   // NPC shop?
   const nearShop = state.npc_shops.find(s => Math.abs(s.x - tx) <= 1 && Math.abs(s.y - ty) <= 1);
   if (nearShop) { openShopMenu(nearShop.key); return; }
+
+  const ownSilo = _ownSiloNearPlayer();
+  if (ownSilo) { openSiloMenu(ownSilo); return; }
 
   // Own pile or other's pile?
   const pilesHere = state.piles.filter(pl => pl.x === tx && pl.y === ty);

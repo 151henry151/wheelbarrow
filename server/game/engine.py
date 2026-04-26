@@ -58,6 +58,7 @@ from server.game.construction import (
     foundation_remaining,
     building_remaining,
 )
+from server.game.ids import ids_equal as _ids_equal
 from server.db import queries
 from server.config import settings
 
@@ -71,16 +72,6 @@ def _bucket_total(bucket: dict) -> float:
 
 def _pile_collect_key(tx: int, ty: int, rtype: str) -> str:
     return f"{tx},{ty},{rtype}"
-
-
-def _ids_equal(a, b) -> bool:
-    """True if a and b are the same numeric id (DB / JSON may yield str vs int)."""
-    if a is None or b is None:
-        return False
-    try:
-        return int(a) == int(b)
-    except (TypeError, ValueError):
-        return False
 
 
 def _crop_harvest_yield(crop: dict, cdef: dict) -> float:
@@ -1465,11 +1456,11 @@ class GameEngine:
             n for n in self.structures.values()
             if n.get("is_silo")
             and not n.get("construction_active")
-            and n.get("owner_id") == player_id
+            and _ids_equal(n.get("owner_id"), player_id)
             and max(abs(ptx - int(n["x"])), abs(pty - int(n["y"]))) <= 1
         ]
         node = self._pick_adjacent_structure(ptx, pty, cands)
-        if not node or node.get("owner_id") != player_id:
+        if not node or not _ids_equal(node.get("owner_id"), player_id):
             await self._send(player_id, {"type": "notice", "msg": "Stand on or next to your silo to withdraw grain."})
             return
         inv = node.setdefault("inventory", {})
@@ -1508,7 +1499,7 @@ class GameEngine:
             n for n in self.structures.values()
             if n.get("is_silo")
             and not n.get("construction_active")
-            and n.get("owner_id") == player_id
+            and _ids_equal(n.get("owner_id"), player_id)
             and max(abs(ptx - int(n["x"])), abs(pty - int(n["y"]))) <= 1
         ]
         silo = self._pick_adjacent_structure(ptx, pty, silo_cands)
@@ -2640,6 +2631,11 @@ class GameEngine:
             cap = float(STRUCTURE_DEFS.get(st or "", {}).get("silo_capacity", 0) or 0)
             out["silo_wheat"] = round(float(inv.get("wheat", 0) or 0), 1)
             out["silo_capacity"] = cap
+            out["silo_inventory"] = {
+                k: round(float(v or 0), 2)
+                for k, v in inv.items()
+                if float(v or 0) > 0
+            }
         if n.get("node_type") == "wood" and not n.get("is_structure"):
             out["tree_variant"] = int(n.get("tree_variant") or 0)
         return out

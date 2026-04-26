@@ -7,10 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.12.87] - 2026-04-24
+## [0.12.88] - 2026-04-16
+
+### Added
+- **Repository** (`LICENSE`): License the project under **GNU GPL version 3** (full license text).
+- **Documentation** (`README.md`): Add **License** section pointing to **`LICENSE`**.
+- **Packaging** (`pyproject.toml`): Declare **`readme`**, SPDX **`GPL-3.0-only`**, and **`license`** metadata.
+
+### Changed
+- **Client** (`client/index.html`): Bump cache-bust query strings to **0.12.88**.
+
+## [0.12.87] - 2026-04-16
+
+### Added
+- **Client** (`client/js/game.js`, `client/index.html`, `client/css/style.css`): **Silo menu** — **[E]** on or next to your silo shows stored contents (via **`silo_inventory`** / **`silo_wheat`**), **[1]** load withdrawable resources (wheat today), **[N]** / button **sell all wheat** autopilot (silo ↔ NPC market).
+- **Server** (`server/game/engine.py`): **`silo_inventory`** on node wire for extensible multi-type display.
+- **Server** (`server/game/ids.py`): **`ids_equal`** helper for id comparisons without pulling in **`engine`**.
+- **Tests** (`tests/test_ids_equal.py`): Cover **`ids_equal`** coercion and **`None`** handling.
 
 ### Fixed
-- **Client** (`game.js`, `renderer.js`): Simplify owned-land checks back to a direct **bbox + `_sameOwnerId` / `_samePlayerId`** loop over `world_parcels`; removes the multi-path `standing_parcel` fallback chain that was masking the match. Restores: (1) tile highlight when standing on own land, (2) `[F]` farming hints in HUD, (3) F-key till/plant/fertilize/harvest.
+- **Server** (`server/game/engine.py`, `server/game/ids.py`): Use **`ids_equal`** for silo **withdraw** and **unload** ownership checks so DB/JSON **`owner_id`** types match **`player_id`**.
 
 ## [0.12.86] - 2026-04-24
 

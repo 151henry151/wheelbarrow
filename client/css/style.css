@@ -153,6 +153,7 @@ canvas#game:active { cursor: grabbing; }
 #build-menu,
 #shop-menu,
 #pile-menu,
+#silo-menu,
 #town-menu {
   position: fixed;
   top: 12px;
@@ -168,10 +169,12 @@ canvas#game:active { cursor: grabbing; }
 #build-menu-title,
 #shop-menu-title,
 #pile-menu-title,
+#silo-menu-title,
 #town-menu-title  { color: #7ab648; font-size: 0.9rem; margin-bottom: 8px; }
 #build-menu-items,
 #shop-menu-items,
 #pile-menu-items,
+#silo-menu-items,
 #town-menu-items  { line-height: 2; }
 .build-option     { cursor: default; }
 .build-option.affordable   { color: #e8e8e8; }
