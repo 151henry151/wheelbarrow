@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.89] - 2026-04-16
+
+### Fixed
+- **Client** (`client/js/renderer.js`): Set **`frustumCulled = false`** on water and road **`InstancedMesh`** so rivers and roads are not dropped when the default bounding volume misses the frustum (dynamic instance matrices).
+
+### Changed
+- **Client** (`client/index.html`): Bump cache-bust query strings to **0.12.89**.
+
 ## [0.12.88] - 2026-04-16
 
 ### Added

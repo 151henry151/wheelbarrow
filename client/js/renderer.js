@@ -357,6 +357,10 @@ ${sdRoundBoxFn}`,
       );
     };
     waterMesh = new THREE.InstancedMesh(waterGeo, waterMat, MAX_WATER);
+    // Dynamic instance positions cover a large world; the mesh bounding volume is not
+    // expanded from instance matrices, so frustum culling can drop the entire river layer
+    // at most camera angles (see InstancedMesh + frustumCulled).
+    waterMesh.frustumCulled = false;
     waterMesh.receiveShadow = false;
     waterMesh.renderOrder = 2;
     waterMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -369,6 +373,7 @@ ${sdRoundBoxFn}`,
     roadMat.polygonOffsetFactor = -1;
     roadMat.polygonOffsetUnits = -3;
     roadMesh = new THREE.InstancedMesh(roadGeo, roadMat, MAX_ROAD);
+    roadMesh.frustumCulled = false;
     roadMesh.receiveShadow = true;
     roadMesh.castShadow = false;
     roadMesh.renderOrder = 1;
