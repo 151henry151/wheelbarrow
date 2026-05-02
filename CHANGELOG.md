@@ -7,22 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.12.90] - 2026-05-01
+## [0.12.91] - 2026-04-16
 
 ### Fixed
-- **Client** (`client/js/renderer.js`): Add `THREE.DoubleSide` to road and water `InstancedMesh` materials — roads and rivers now stay visible even when the camera pitch is shallow and elevated terrain places the plane above the camera's Y position.
-
-### Added
-- **Map** (`[M]` key): Full-screen zoomable/pannable top-down map overlay showing towns, parcels (price or owner), roads, water, buildings, NPC markets/shops, windfalls, and other players. Scroll to zoom, drag to pan.
-- **Shop auto-close**: Seed/repair/general shops close automatically when the player drives away from the shop tile.
-- **Seasonal market prices**: NPC market base prices now shift with the season (e.g. wheat premium in fall, wood premium in winter). Each NPC market also has its own per-resource price modifier (varies ±40% from global price).
-- **Distance-based parcel pricing**: Land parcels farther from any NPC market are cheaper (exponential discount; min 35% of base formula).
-- **Windfalls**: Seasonal collectible items spawn on the map and expire after 10 minutes. Spring: wild leeks; Summer: berries; Fall: wild pumpkins / wild apples; Winter: none. Auto-collected when the player is within 1 tile; coins awarded immediately.
-- **Winter visuals**: Ground turns snow-white in winter; rivers and ponds render as pale ice-blue.
-- **Ice mechanics**: In winter, rivers and ponds freeze — the player can drive over them at high speed (2× road speed) but steering is greatly reduced and momentum carries them forward even when the key is released.
+- **Client** (`client/index.html`): Add **`#map-overlay`** and **`#map-canvas`** inside **`#game-screen`** so the world map can render (they were missing while **`game.js`** already called **`openMap`** / **`drawMap`**).
+- **Client** (`client/js/game.js`): Stop treating **`M`** in the capture-phase key listener as “close map” so **`M`** toggles correctly; close the map from **`closeAllMenus`** / **`Escape`; show **`[M] map`** on **`#hud-toggle`** with **`H`**; skip **Enter** → chat while the map is open.
 
 ### Changed
-- **Client** (`client/index.html`): Bump cache-bust query strings to **0.12.90**.
+- **Client** (`client/index.html`): Bump cache-bust query strings to **0.12.91**.
 
 ## [0.12.89] - 2026-04-16
 

@@ -1546,6 +1546,7 @@ function closeAllMenus() {
   document.getElementById('pile-menu').style.display  = 'none';
   document.getElementById('silo-menu').style.display  = 'none';
   document.getElementById('town-menu').style.display  = 'none';
+  closeMap();
 }
 
 // ------------------------------------------------------------ HUD toggle
@@ -1554,7 +1555,7 @@ function toggleHud() {
   const show = state.hudVisible;
   document.getElementById('hud').style.display    = show ? 'block' : 'none';
   document.getElementById('hud-wb').style.display = show ? 'block' : 'none';
-  document.getElementById('hud-toggle').textContent = show ? '[H] close hud' : '[H] hud';
+  document.getElementById('hud-toggle').textContent = show ? '[H] close hud  [M] map' : '[H] hud  [M] map';
 }
 
 // --------------------------------------------------------------- key handler
@@ -1567,6 +1568,7 @@ function handleKey(key, isRepeat) {
   const chatInputEl = document.getElementById('chat-input');
   const chatWrapEl = document.getElementById('chat-input-wrap');
   if (key === 'Enter' && !isRepeat) {
+    if (_mapOpen) return;
     if (state.buildMenuOpen || state.shopMenuOpen || state.pileMenuOpen || state.townMenuOpen || state.siloMenuOpen) {
       return;
     }
@@ -1579,8 +1581,12 @@ function handleKey(key, isRepeat) {
     return;
   }
 
-  // Escape: cancel parcel preview or close menus
+  // Escape: cancel parcel preview or close menus / map
   if (key === 'Escape') {
+    if (_mapOpen) {
+      closeMap();
+      return;
+    }
     if (chatWrapEl && chatWrapEl.style.display !== 'none') {
       closeChatComposer();
       return;
@@ -1871,7 +1877,7 @@ window.addEventListener('load', () => {
     // HUD is hidden by default
     document.getElementById('hud').style.display    = 'none';
     document.getElementById('hud-wb').style.display = 'none';
-    document.getElementById('hud-toggle').textContent = '[H] hud';
+    document.getElementById('hud-toggle').textContent = '[H] hud  [M] map';
 
     Renderer.init(canvas, state);
     Input.init(msg => {
@@ -1887,8 +1893,12 @@ window.addEventListener('load', () => {
     }, handleKey);
 
     window.addEventListener('keydown', (e) => {
-      if (_mapOpen && (e.key === 'm' || e.key === 'M' || e.key === 'Escape')) {
-        closeMap(); e.preventDefault(); return;
+      // Only Escape here: M is handled in handleKey (toggle). Handling M in capture
+      // phase closed the map then bubble-phase toggle reopened it.
+      if (_mapOpen && e.key === 'Escape') {
+        closeMap();
+        e.preventDefault();
+        return;
       }
       if (!state.sellAutopilotActive) return;
       if (e.ctrlKey || e.altKey || e.metaKey) return;
@@ -2131,7 +2141,7 @@ window.addEventListener('load', () => {
       if (_mapOpen) drawMap();
       if (!state.hudVisible && state.player) {
         document.getElementById('hud-toggle').textContent =
-          `[H] hud  (${state.player.x}, ${state.player.y})`;
+          `[H] hud  [M] map  (${state.player.x.toFixed(1)}, ${state.player.y.toFixed(1)})`;
       }
       requestAnimationFrame(loop);
     }
