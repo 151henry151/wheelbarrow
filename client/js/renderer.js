@@ -109,11 +109,14 @@ const Renderer = (() => {
       Math.cos(fx * 0.65 - fy * 0.88) * 0.36 +
       Math.sin((tx + ty) * 0.095) * 0.28;
     const t = (n + 1.06) / 2.12;
-    return {
-      r: (46 + t * 14) / 255,
-      g: (68 + t * 16) / 255,
-      b: (38 + t * 12) / 255,
-    };
+    const r = (46 + t * 14) / 255;
+    const g = (68 + t * 16) / 255;
+    const b = (38 + t * 12) / 255;
+    if (_seasonName() === 'winter') {
+      const wb = 0.82;
+      return { r: r * (1 - wb) + 0.86 * wb, g: g * (1 - wb) + 0.89 * wb, b: b * (1 - wb) + 0.93 * wb };
+    }
+    return { r, g, b };
   }
 
   /** Same palette as {@link _fieldGrassRgb} but sampled in **world XZ** so colors do not jump at tile edges. */
@@ -125,11 +128,14 @@ const Renderer = (() => {
       Math.cos(fx * 0.65 - fy * 0.88) * 0.36 +
       Math.sin((worldX + worldZ) * 0.00296875) * 0.28;
     const t = (n + 1.06) / 2.12;
-    return {
-      r: (46 + t * 14) / 255,
-      g: (68 + t * 16) / 255,
-      b: (38 + t * 12) / 255,
-    };
+    const r = (46 + t * 14) / 255;
+    const g = (68 + t * 16) / 255;
+    const b = (38 + t * 12) / 255;
+    if (_seasonName() === 'winter') {
+      const wb = 0.82;
+      return { r: r * (1 - wb) + 0.86 * wb, g: g * (1 - wb) + 0.89 * wb, b: b * (1 - wb) + 0.93 * wb };
+    }
+    return { r, g, b };
   }
 
   function _shadeRgb(o, dr, dg, db) {
@@ -173,7 +179,10 @@ const Renderer = (() => {
     }
     if (sun) {
       sun.color.setHex(0xffffff);
-      sun.intensity = 1.82;
+      sun.intensity = name === 'winter' ? 1.2 : 1.82;
+    }
+    if (waterMat) {
+      waterMat.color.setHex(name === 'winter' ? 0xc8e4f2 : 0x4ec8ff);
     }
   }
 
@@ -273,6 +282,7 @@ const Renderer = (() => {
       polygonOffset: true,
       polygonOffsetFactor: -1,
       polygonOffsetUnits: -1,
+      side: THREE.DoubleSide,
     });
     if (THREE.SRGBColorSpace !== undefined) {
       waterMat.colorSpace = THREE.SRGBColorSpace;
@@ -368,7 +378,7 @@ ${sdRoundBoxFn}`,
 
     // Flat dirt ribbon (XZ plane) — reads as a path, not a tall block on every tile.
     const roadGeo = new THREE.PlaneGeometry(T + ROAD_TILE_OVERLAP, T + ROAD_TILE_OVERLAP);
-    roadMat = new THREE.MeshLambertMaterial({ color: 0x5c4334, emissive: 0x120c08, emissiveIntensity: 0.35 });
+    roadMat = new THREE.MeshLambertMaterial({ color: 0x5c4334, emissive: 0x120c08, emissiveIntensity: 0.35, side: THREE.DoubleSide });
     roadMat.polygonOffset = true;
     roadMat.polygonOffsetFactor = -1;
     roadMat.polygonOffsetUnits = -3;
@@ -1727,6 +1737,37 @@ ${sdRoundBoxFn}`,
     }
   }
 
+  const WINDFALL_COLORS = {
+    wild_leeks:    0x4caf50,
+    berries:       0xcc3399,
+    wild_pumpkins: 0xff8c00,
+    wild_apples:   0xff2a2a,
+  };
+
+  function _windfalls(sx, sy, ex, ey) {
+    for (const wf of s.windfalls || []) {
+      if (wf.x < sx - 2 || wf.x > ex + 2 || wf.y < sy - 2 || wf.y > ey + 2) continue;
+      const { x, z } = _worldXZ(wf.x, wf.y);
+      const gy = _groundY(wf.x, wf.y);
+      const col = WINDFALL_COLORS[wf.type] || 0xffd700;
+      const t = (typeof performance !== 'undefined' ? performance.now() : Date.now()) * 0.002;
+      const bob = Math.sin(t + wf.x * 0.3 + wf.y * 0.7) * 3;
+      const sphere = new THREE.Mesh(
+        new THREE.SphereGeometry(4, 8, 6),
+        new THREE.MeshLambertMaterial({ color: col, emissive: col, emissiveIntensity: 0.55 }),
+      );
+      sphere.position.set(x, gy + 10 + bob, z);
+      dynamicRoot.add(sphere);
+      const ring = new THREE.Mesh(
+        new THREE.TorusGeometry(6, 0.8, 6, 16),
+        new THREE.MeshBasicMaterial({ color: col }),
+      );
+      ring.rotation.x = Math.PI / 2;
+      ring.position.set(x, gy + 1.5, z);
+      dynamicRoot.add(ring);
+    }
+  }
+
   function draw() {
     if (!s.player || typeof THREE === 'undefined') return;
     if (!renderer || !scene || !camera) return;
@@ -1826,6 +1867,7 @@ ${sdRoundBoxFn}`,
     _piles(sx, sy, ex, ey);
     _crops(sx, sy, ex, ey);
     _players(sx, sy, ex, ey, rx, ry);
+    _windfalls(sx, sy, ex, ey);
 
     renderer.render(scene, camera);
     } catch (err) {

@@ -33,6 +33,9 @@ from server.game.constants import (
     MAX_TAX_RATE, ELECTION_CYCLE_DAYS, VOTING_WINDOW_HOURS,
     VIEWPORT_RADIUS,
     VIEWPORT_WATER_RADIUS,
+    SEASONAL_PRICE_MULT, MARKET_MODIFIER_RANGE,
+    WINDFALL_TYPES, WINDFALL_LIFETIME_S, WINDFALL_MAX_ACTIVE, WINDFALL_SPAWN_INTERVAL,
+    WINDFALL_SELL_PRICE,
 )
 from server.game.seasons import SeasonClock
 from server.game.wb_condition import (
@@ -199,6 +202,9 @@ class GameEngine:
         self.prices: dict[str, float] = {}
         self.sales_volume: dict[str, float] = {r: 0.0 for r in MARKET_BASE_PRICES}
         self.season = SeasonClock()
+        self.windfalls: dict[int, dict] = {}
+        self._next_windfall_id: int = 1
+        self._last_windfall_spawn: float = 0.0
 
         self._last_resource_tick = time.monotonic()
         self._last_persist       = time.monotonic()
@@ -1017,13 +1023,19 @@ class GameEngine:
         bucket = player.get("bucket", {})
         if not bucket:
             return
+        # Use per-market prices when player is at a specific market
+        mkt = self._which_npc_market(player)
+        if mkt:
+            local_prices = self._market_prices_for(mkt[0], mkt[1])
+        else:
+            local_prices = self.prices
         earned = 0.0
         new_bucket: dict = {}
         for rtype, amount in bucket.items():
             if rtype not in MARKET_BASE_PRICES:
                 new_bucket[rtype] = amount
                 continue
-            price = self.prices.get(rtype, 0)
+            price = local_prices.get(rtype, self.prices.get(rtype, 0))
             earned += amount * price
             self.sales_volume[rtype] = self.sales_volume.get(rtype, 0) + amount
         player["coins"] += int(earned)
@@ -2230,6 +2242,7 @@ class GameEngine:
             try:
                 ev = integrate_player_movement(
                     pl, dt, self.water_tiles, self.bridge_tiles, blocked_movement, self.road_tiles,
+                    season_name=self.season.name,
                 )
                 self._dispatch_wb_move_events(pid, ev)
             except Exception:
@@ -2256,6 +2269,10 @@ class GameEngine:
         if now - self._last_market_drift >= MARKET_DRIFT_INTERVAL:
             self._last_market_drift = now
             await self._do_market_drift()
+
+        if now - self._last_windfall_spawn >= WINDFALL_SPAWN_INTERVAL:
+            self._last_windfall_spawn = now
+            self._tick_windfalls(now)
 
         # Election check once per minute
         if now - self._last_election_check >= 60:
@@ -2410,19 +2427,100 @@ class GameEngine:
                         owner["coins"] += node.get("collect_fee", 1)
 
             self._refresh_collecting_state(player, ptx, pty, all_nodes)
+            # Auto-collect nearby windfalls
+            self._collect_windfalls_for(player)
         self._invalidate_movement_blocked_cache()
 
     async def _do_market_drift(self):
+        season_mults = SEASONAL_PRICE_MULT.get(self.season.name, {})
         for rtype, base in MARKET_BASE_PRICES.items():
             sold    = self.sales_volume.get(rtype, 0.0)
             current = self.prices.get(rtype, base)
-            if sold >= MARKET_DRIFT_INTERVAL:
-                new_price = max(round(base * 0.5, 2), round(current * 0.85, 2))
+            # Apply seasonal modifier to the base before drift
+            s_mult  = season_mults.get(rtype, 1.0)
+            s_base  = round(base * s_mult, 2)
+            if sold >= MARKET_DRIFT_THRESHOLD:
+                new_price = max(round(s_base * 0.5, 2), round(current * 0.85, 2))
             else:
-                new_price = min(round(base * 2.0, 2), round(current * 1.10, 2))
+                new_price = min(round(s_base * 2.0, 2), round(current * 1.10, 2))
             self.prices[rtype]       = new_price
             self.sales_volume[rtype] = 0.0
         await queries.update_market_prices(self.prices)
+
+    def _market_modifier(self, rtype: str, mx: int, my: int) -> float:
+        """Deterministic per-resource, per-market price modifier using position as seed."""
+        import hashlib
+        seed = f"{mx},{my},{rtype}"
+        h = int(hashlib.md5(seed.encode()).hexdigest()[:8], 16)
+        lo, hi = MARKET_MODIFIER_RANGE
+        return round(lo + (h % 10000) / 10000.0 * (hi - lo), 3)
+
+    def _which_npc_market(self, player: dict) -> tuple[int, int] | None:
+        """Return (mx, my) of the NPC market the player is standing at, or None."""
+        ptx, pty = player_tile_xy(player)
+        for town in self.towns.values():
+            d = town.get("npc_district") or {}
+            m = d.get("market")
+            if m and len(m) >= 2:
+                mx, my = int(m[0]), int(m[1])
+                if max(abs(ptx - mx), abs(pty - my)) <= 1:
+                    return (mx, my)
+        mx, my = MARKET_TILE
+        if max(abs(ptx - mx), abs(pty - my)) <= 1:
+            return (mx, my)
+        return None
+
+    def _market_prices_for(self, mx: int, my: int) -> dict[str, float]:
+        """Global prices × per-market modifiers, rounded to 2 dp."""
+        result = {}
+        for rtype, price in self.prices.items():
+            mod = self._market_modifier(rtype, mx, my)
+            result[rtype] = round(price * mod, 2)
+        return result
+
+    def _tick_windfalls(self, now: float) -> None:
+        """Expire old windfalls and maybe spawn new ones."""
+        # Expire
+        expired = [wid for wid, wf in self.windfalls.items()
+                   if now - wf["spawned_at"] >= WINDFALL_LIFETIME_S]
+        for wid in expired:
+            del self.windfalls[wid]
+
+        # Spawn
+        season_types = WINDFALL_TYPES.get(self.season.name, [])
+        if not season_types:
+            return
+        if len(self.windfalls) >= WINDFALL_MAX_ACTIVE:
+            return
+
+        # Pick a random location away from spawn
+        import random as _random
+        wtype, wmin, wmax = _random.choice(season_types)
+        x = _random.randint(20, WORLD_W - 20)
+        y = _random.randint(20, WORLD_H - 20)
+        amount = _random.randint(wmin, wmax)
+
+        wid = self._next_windfall_id
+        self._next_windfall_id += 1
+        self.windfalls[wid] = {
+            "id": wid, "x": x, "y": y,
+            "type": wtype, "amount": amount,
+            "spawned_at": now,
+        }
+
+    def _collect_windfalls_for(self, player: dict) -> None:
+        """Auto-collect any windfall within 1 tile of the player."""
+        ptx, pty = player_tile_xy(player)
+        sell_price = WINDFALL_SELL_PRICE
+        to_remove = []
+        for wid, wf in list(self.windfalls.items()):
+            if max(abs(wf["x"] - ptx), abs(wf["y"] - pty)) <= 1:
+                wtype  = wf["type"]
+                earned = wf["amount"] * sell_price.get(wtype, 8)
+                player["coins"] = int(player.get("coins", 0)) + earned
+                to_remove.append(wid)
+        for wid in to_remove:
+            del self.windfalls[wid]
 
     async def _do_election_check(self):
         """Resolve any towns whose election window has just closed."""
@@ -2527,6 +2625,14 @@ class GameEngine:
             nearby_water = self._nearby_water_tiles(px, py)
             nearby_bridges = self._nearby_bridge_tiles(px, py)
             nearby_poor = self._nearby_poor_soil_tiles(px, py, pid)
+            mkt = self._which_npc_market(player)
+            market_prices = self._market_prices_for(mkt[0], mkt[1]) if mkt else None
+            now_ts = time.monotonic()
+            windfalls_wire = [
+                {"id": wf["id"], "x": wf["x"], "y": wf["y"],
+                 "type": wf["type"], "amount": wf["amount"]}
+                for wf in self.windfalls.values()
+            ]
             await self._send_json_ws_safe(
                 ws,
                 {
@@ -2542,7 +2648,9 @@ class GameEngine:
                     "bridge_tiles": nearby_bridges,
                     "poor_soil_tiles": nearby_poor,
                     "prices":     self.prices,
+                    "market_prices": market_prices,
                     "season":     self.season.wire(),
+                    "windfalls":  windfalls_wire,
                 },
                 pid=pid,
             )
@@ -2844,6 +2952,11 @@ class GameEngine:
             "prices":  self.prices,
             "season":  self.season.wire(),
             "world":   {"w": WORLD_W, "h": WORLD_H},
+            "windfalls": [
+                {"id": wf["id"], "x": wf["x"], "y": wf["y"],
+                 "type": wf["type"], "amount": wf["amount"]}
+                for wf in self.windfalls.values()
+            ],
         }
 
 

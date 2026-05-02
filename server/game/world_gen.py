@@ -16,7 +16,8 @@ from server.game.constants import (
     PARCEL_W_RANGE, PARCEL_H_RANGE,
     PARCEL_PRICE_PER_TILE, PARCEL_RESOURCE_BONUS, PARCEL_MIN_PRICE,
     TOWN_PARCELS_PER_TOWN, WILDERNESS_PARCELS,
-    PLAYER_SPAWN,
+    PLAYER_SPAWN, MARKET_TILE,
+    PARCEL_DISTANCE_DISCOUNT_SCALE, PARCEL_DISTANCE_MIN_MULT,
 )
 from server.game.town_npcs import place_npc_district
 from server.game.terrain_features import (
@@ -511,6 +512,21 @@ def _generate_parcels(rng: random.Random, towns: list[dict],
             if x <= nx < x + w and y <= ny < y + h
         )
 
+    # Gather all NPC market positions for distance-based pricing
+    _market_positions: list[tuple[int, int]] = [MARKET_TILE]
+    for _town in towns:
+        _d = (_town.get("npc_district") or {})
+        _m = _d.get("market")
+        if _m and len(_m) >= 2:
+            _market_positions.append((int(_m[0]), int(_m[1])))
+
+    def _parcel_distance_mult(cx: float, cy: float) -> float:
+        if not _market_positions:
+            return 1.0
+        min_dist = min(math.hypot(cx - mx, cy - my) for mx, my in _market_positions)
+        raw = math.exp(-min_dist / PARCEL_DISTANCE_DISCOUNT_SCALE)
+        return max(PARCEL_DISTANCE_MIN_MULT, raw)
+
     def _try_place(x, y, w, h, town_idx):
         if x < 5 or y < 5 or x + w > WORLD_W - 5 or y + h > WORLD_H - 5:
             return None
@@ -521,7 +537,11 @@ def _generate_parcels(rng: random.Random, towns: list[dict],
             return None
         occupied.update(tiles)
         rc    = _count_resources(x, y, w, h)
-        price = max(PARCEL_MIN_PRICE, w * h * PARCEL_PRICE_PER_TILE + rc * PARCEL_RESOURCE_BONUS)
+        base_price = max(PARCEL_MIN_PRICE, w * h * PARCEL_PRICE_PER_TILE + rc * PARCEL_RESOURCE_BONUS)
+        cx    = x + w / 2.0
+        cy    = y + h / 2.0
+        dist_mult = _parcel_distance_mult(cx, cy)
+        price = max(PARCEL_MIN_PRICE, int(round(base_price * dist_mult)))
         return {
             "x": x, "y": y, "w": w, "h": h,
             "price": price, "town_idx": town_idx,

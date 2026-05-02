@@ -24,6 +24,10 @@ BASE_MOVE_TILES_PER_SEC = 6.0
 TURN_RADIANS_PER_SEC = 1.6
 # Faster on dirt roads (no heading lock — steering stays fully player-controlled).
 ROAD_SPEED_MULT = 1.38
+# Winter ice: frozen water tiles are fast but hard to stop/steer.
+ICE_SPEED_MULT  = 2.1   # faster than roads
+ICE_TURN_MULT   = 0.30  # steering much reduced
+ICE_MOMENTUM_DECAY = 0.985  # per-tick decay (keeps sliding when not pressing)
 
 
 def player_tile_xy(p: dict) -> tuple[int, int]:
@@ -89,6 +93,7 @@ def _walkable_tile(
     water_tiles: set[tuple[int, int]],
     bridge_tiles: set[tuple[int, int]],
     road_tiles: set[tuple[int, int]],
+    is_winter: bool = False,
 ) -> bool:
     # Roads are always walkable. Intra-town paths (and legacy DB rows) can overlap water without a
     # matching DELETE from water_tiles; inter-town gen removes water from road cells, but NPC paths do not.
@@ -96,6 +101,8 @@ def _walkable_tile(
         return True
     if (tx, ty) in bridge_tiles:
         return True
+    if is_winter and (tx, ty) in water_tiles:
+        return True  # frozen — driveable as ice
     return (tx, ty) not in water_tiles
 
 
@@ -107,12 +114,13 @@ def _segment_hits_water(
     water_tiles: set[tuple[int, int]],
     bridge_tiles: set[tuple[int, int]],
     road_tiles: set[tuple[int, int]],
+    is_winter: bool = False,
 ) -> bool:
     for t in (0.12, 0.35, 0.55, 0.75, 0.92):
         x = x0 + (x1 - x0) * t
         y = y0 + (y1 - y0) * t
         tx, ty = int(math.floor(x)), int(math.floor(y))
-        if not _walkable_tile(tx, ty, water_tiles, bridge_tiles, road_tiles):
+        if not _walkable_tile(tx, ty, water_tiles, bridge_tiles, road_tiles, is_winter):
             return True
     return False
 
@@ -145,8 +153,11 @@ def integrate_player_movement(
     bridge_tiles: set[tuple[int, int]],
     blocked_tiles: set[tuple[int, int]],
     road_tiles: set[tuple[int, int]],
+    season_name: str = "spring",
 ) -> list[str]:
     """Apply _input_fwd / _input_turn; returns wheelbarrow events from wear."""
+    is_winter = (season_name == "winter")
+
     fwd = float(player.get("_input_fwd", 0.0) or 0.0)
     turn = float(player.get("_input_turn", 0.0) or 0.0)
     fwd = max(-1.0, min(1.0, fwd))
@@ -154,33 +165,56 @@ def integrate_player_movement(
 
     angle = float(player.get("angle", math.pi / 2))
 
-    if abs(turn) > 1e-6:
-        angle += turn * TURN_RADIANS_PER_SEC * dt
-        while angle > math.pi:
-            angle -= 2.0 * math.pi
-        while angle < -math.pi:
-            angle += 2.0 * math.pi
-
     tx0, ty0 = player_tile_xy(player)
+    on_ice = is_winter and (tx0, ty0) in water_tiles
+
+    if on_ice:
+        # Ice: steering heavily reduced
+        if abs(turn) > 1e-6:
+            angle += turn * TURN_RADIANS_PER_SEC * ICE_TURN_MULT * dt
+        # Ice momentum: decay slowly, player can steer but can't stop instantly
+        ice_vel = float(player.get("_ice_vel", fwd))
+        if abs(fwd) > 1e-6:
+            ice_vel = fwd  # accept new direction/input
+        else:
+            ice_vel *= ICE_MOMENTUM_DECAY  # keep sliding
+        if abs(ice_vel) < 0.04:
+            ice_vel = 0.0
+        player["_ice_vel"] = ice_vel
+        fwd_eff = ice_vel
+    else:
+        player["_ice_vel"] = 0.0
+        fwd_eff = fwd
+        if abs(turn) > 1e-6:
+            angle += turn * TURN_RADIANS_PER_SEC * dt
+
+    while angle > math.pi:
+        angle -= 2.0 * math.pi
+    while angle < -math.pi:
+        angle += 2.0 * math.pi
 
     player["angle"] = angle
 
     events: list[str] = []
 
-    if abs(fwd) < 1e-6:
+    if abs(fwd_eff) < 1e-6:
         return events
 
-    load_m = load_speed_mult(player)
-    flat_m = 3.0 if player.get("flat_tire") else 1.0
-    terr_m = terrain_interval_mult(float(player["x"]), float(player["y"]), angle)
-    on_road = (tx0, ty0) in road_tiles
-    road_m = ROAD_SPEED_MULT if on_road else 1.0
-    speed = BASE_MOVE_TILES_PER_SEC / load_m / flat_m / terr_m * road_m
-    dist = abs(fwd) * speed * dt
+    if on_ice:
+        speed = BASE_MOVE_TILES_PER_SEC * ICE_SPEED_MULT
+    else:
+        load_m = load_speed_mult(player)
+        flat_m = 3.0 if player.get("flat_tire") else 1.0
+        terr_m = terrain_interval_mult(float(player["x"]), float(player["y"]), angle)
+        on_road = (tx0, ty0) in road_tiles
+        road_m = ROAD_SPEED_MULT if on_road else 1.0
+        speed = BASE_MOVE_TILES_PER_SEC / load_m / flat_m / terr_m * road_m
+
+    dist = abs(fwd_eff) * speed * dt
     if dist <= 1e-9:
         return events
 
-    sign = 1.0 if fwd > 0 else -1.0
+    sign = 1.0 if fwd_eff > 0 else -1.0
     dx = math.cos(angle) * dist * sign
     dy = math.sin(angle) * dist * sign
 
@@ -191,14 +225,17 @@ def integrate_player_movement(
     nx = max(0.0, min(float(WORLD_W) - 1e-7, nx))
     ny = max(0.0, min(float(WORLD_H) - 1e-7, ny))
 
-    if _segment_hits_water(ox, oy, nx, ny, water_tiles, bridge_tiles, road_tiles):
+    if _segment_hits_water(ox, oy, nx, ny, water_tiles, bridge_tiles, road_tiles, is_winter):
+        # On ice, keep sliding in allowed direction
+        if on_ice:
+            player["_ice_vel"] = 0.0
         return events
     if _segment_hits_blocked(ox, oy, nx, ny, blocked_tiles):
         return events
 
     tx, ty = int(math.floor(nx)), int(math.floor(ny))
     sx, sy = int(math.floor(ox)), int(math.floor(oy))
-    if not _walkable_tile(tx, ty, water_tiles, bridge_tiles, road_tiles):
+    if not _walkable_tile(tx, ty, water_tiles, bridge_tiles, road_tiles, is_winter):
         return events
     # Reject entering a blocked tile from another tile; allow leaving or nudging within same tile.
     if (tx, ty) in blocked_tiles and (tx, ty) != (sx, sy):
@@ -206,9 +243,10 @@ def integrate_player_movement(
 
     player["x"], player["y"] = nx, ny
 
-    player["_wear_accum"] = float(player.get("_wear_accum", 0.0)) + dist
-    while player["_wear_accum"] >= 1.0:
-        player["_wear_accum"] -= 1.0
-        events.extend(apply_move_decay(player))
+    if not on_ice:
+        player["_wear_accum"] = float(player.get("_wear_accum", 0.0)) + dist
+        while player["_wear_accum"] >= 1.0:
+            player["_wear_accum"] -= 1.0
+            events.extend(apply_move_decay(player))
 
     return events

@@ -282,3 +282,40 @@ MARKET_BASE_PRICES = {
 }
 MARKET_DRIFT_INTERVAL  = 60
 MARKET_DRIFT_THRESHOLD = 50
+
+# Per-market price variety: each NPC market has a deterministic per-resource modifier
+# in this range relative to the global price. Based on a hash of the market tile position.
+MARKET_MODIFIER_RANGE = (0.70, 1.40)
+
+# Seasonal price multipliers applied on top of per-market modifiers.
+SEASONAL_PRICE_MULT: dict[str, dict[str, float]] = {
+    "spring": {"wheat": 1.20, "manure": 1.15, "topsoil": 1.20, "compost": 1.10},
+    "summer": {"wood":  1.20, "stone":  1.10, "wheat":   0.85, "clay":    1.10},
+    "fall":   {"wheat": 1.40, "compost":1.30, "gravel":  1.10, "wood":    0.90},
+    "winter": {"wood":  1.45, "stone":  1.35, "clay":    1.25, "manure":  0.80},
+}
+
+# ---- Windfalls --------------------------------------------------------------
+WINDFALL_LIFETIME_S   = 600   # 10 minutes before expiry
+WINDFALL_MAX_ACTIVE   = 15    # max simultaneous windfalls on map
+WINDFALL_SPAWN_INTERVAL = 90  # seconds between spawn checks
+
+# seasonal type → (type_key, min_amount, max_amount)
+WINDFALL_TYPES: dict[str, list[tuple[str, int, int]]] = {
+    "spring": [("wild_leeks",    3,  7)],
+    "summer": [("berries",       4,  9)],
+    "fall":   [("wild_pumpkins", 5, 12), ("wild_apples", 4, 10)],
+    "winter": [],
+}
+# NPC market sale value (coins per unit)
+WINDFALL_SELL_PRICE = {
+    "wild_leeks":    12,
+    "berries":        8,
+    "wild_pumpkins": 15,
+    "wild_apples":   10,
+}
+
+# ---- Parcel distance pricing ------------------------------------------------
+# Parcels close to an NPC market retain full price; farther = cheaper.
+PARCEL_DISTANCE_DISCOUNT_SCALE = 100   # tiles — distance at which price is ~37% of max
+PARCEL_DISTANCE_MIN_MULT       = 0.35  # never cheaper than 35% of formula price

@@ -90,8 +90,10 @@ const state = {
   npc_markets:  [],
   npc_shops:    [],
   prices:       {},
+  market_prices: null,
   season:       null,
   world:        { w: 1000, h: 1000 },
+  windfalls:    [],
 
   // Wheelbarrow sprite facing (screen/world: up = −y, down = +y)
   facing:         'down',
@@ -811,11 +813,13 @@ function updateHud() {
   const nearNpcMarket = _nearNpcMarket(px, py);
   const nearPlayerMarket = state.nodes.some(n => n.is_market && Math.abs(n.x - mtx) <= 1 && Math.abs(n.y - mty) <= 1);
   if (nearNpcMarket || nearPlayerMarket) {
+    const displayPrices = (nearNpcMarket && state.market_prices) ? state.market_prices : state.prices;
+    const priceNote = (nearNpcMarket && state.market_prices) ? ' [this market]' : '';
     document.getElementById('hud-prices').textContent =
-      Object.entries(state.prices)
+      Object.entries(displayPrices)
         .filter(([k]) => k !== 'fertilizer')
         .map(([k, v]) => `${k[0].toUpperCase()}${k.slice(1)}: ${v}c`)
-        .join('  ');
+        .join('  ') + priceNote;
   } else {
     document.getElementById('hud-prices').textContent = '';
   }
@@ -1334,6 +1338,198 @@ function _addMenuItem(container, num, label) {
   container.appendChild(div);
 }
 
+// ------------------------------------------------------------------- map
+let _mapOpen = false;
+let _mapScale = 0.62;  // pixels per tile
+let _mapCenterX = 500;
+let _mapCenterY = 500;
+let _mapDragging = false;
+let _mapDragStartX = 0;
+let _mapDragStartY = 0;
+let _mapDragCenterX = 500;
+let _mapDragCenterY = 500;
+
+function openMap() {
+  _mapOpen = true;
+  if (state.player) {
+    _mapCenterX = state.player.x;
+    _mapCenterY = state.player.y;
+  }
+  const ov = document.getElementById('map-overlay');
+  if (ov) ov.style.display = 'flex';
+  drawMap();
+}
+
+function closeMap() {
+  _mapOpen = false;
+  const ov = document.getElementById('map-overlay');
+  if (ov) ov.style.display = 'none';
+}
+
+function toggleMap() {
+  if (_mapOpen) closeMap(); else openMap();
+}
+
+const WINDFALL_MAP_COLORS = {
+  wild_leeks: '#4caf50', berries: '#cc3399',
+  wild_pumpkins: '#ff8c00', wild_apples: '#ff2a2a',
+};
+
+function drawMap() {
+  const canvas = document.getElementById('map-canvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  const sc = _mapScale;
+  const ox = W / 2 - _mapCenterX * sc;
+  const oy = H / 2 - _mapCenterY * sc;
+
+  // Convert tile coords to canvas pixels
+  const tx = (x) => ox + x * sc;
+  const ty = (y) => oy + y * sc;
+
+  ctx.fillStyle = '#1a2420';
+  ctx.fillRect(0, 0, W, H);
+
+  // Draw towns (colored transparent fills)
+  const TOWN_HEX = [
+    '#6a8aff','#6affa0','#ffa06a','#ff6a9a','#a06aff',
+    '#6affff','#ffff6a','#ff9a6a','#6aff8a','#9a6aff',
+  ];
+  for (const town of state.towns || []) {
+    const poly = town.boundary;
+    if (!poly || poly.length < 3) continue;
+    const col = TOWN_HEX[town.id % TOWN_HEX.length];
+    ctx.beginPath();
+    ctx.moveTo(tx(poly[0].x), ty(poly[0].y));
+    for (let i = 1; i < poly.length; i++) ctx.lineTo(tx(poly[i].x), ty(poly[i].y));
+    ctx.closePath();
+    ctx.fillStyle = col + '22';
+    ctx.fill();
+    ctx.strokeStyle = col + 'bb';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    const cnx = town.boundary.reduce((s, p) => s + p.x, 0) / town.boundary.length;
+    const cny = town.boundary.reduce((s, p) => s + p.y, 0) / town.boundary.length;
+    if (sc >= 0.4) {
+      ctx.font = `${Math.max(9, sc * 5)}px monospace`;
+      ctx.fillStyle = col;
+      ctx.textAlign = 'center';
+      ctx.fillText(town.name, tx(cnx), ty(cny));
+    }
+  }
+
+  // Draw water tiles
+  ctx.fillStyle = '#4ec8ff66';
+  for (const w of state.water_tiles || []) {
+    ctx.fillRect(tx(w.x), ty(w.y), Math.max(1, sc), Math.max(1, sc));
+  }
+
+  // Draw roads
+  ctx.fillStyle = '#5c433488';
+  for (const r of state.roads || []) {
+    ctx.fillRect(tx(r.x) - sc * 0.1, ty(r.y) - sc * 0.1, Math.max(1, sc * 1.2), Math.max(1, sc * 1.2));
+  }
+
+  // Draw parcels
+  for (const p of state.world_parcels || []) {
+    const px0 = tx(p.x), py0 = ty(p.y);
+    const pw = p.w * sc, ph = p.h * sc;
+    if (p.owner_id != null) {
+      ctx.fillStyle = '#ffcc4422';
+      ctx.fillRect(px0, py0, pw, ph);
+      ctx.strokeStyle = '#ffcc44bb';
+    } else {
+      ctx.fillStyle = '#ffffff11';
+      ctx.strokeStyle = '#ffffff44';
+    }
+    ctx.lineWidth = 1;
+    ctx.strokeRect(px0, py0, pw, ph);
+    if (sc >= 1.2) {
+      ctx.font = `${Math.max(8, sc * 3.5)}px monospace`;
+      ctx.textAlign = 'center';
+      const cx2 = px0 + pw / 2, cy2 = py0 + ph / 2;
+      if (p.owner_id != null) {
+        ctx.fillStyle = '#ffcc44';
+        ctx.fillText(p.owner_name || '?', cx2, cy2);
+      } else {
+        ctx.fillStyle = '#aaa';
+        ctx.fillText(`${p.price}c`, cx2, cy2);
+      }
+    }
+  }
+
+  // Draw nodes/buildings
+  ctx.fillStyle = '#d4a06a';
+  for (const n of state.nodes || []) {
+    const bx = tx(n.x), by = ty(n.y);
+    const bs = Math.max(2, sc * 1.4);
+    ctx.fillRect(bx - bs / 2, by - bs / 2, bs, bs);
+  }
+
+  // NPC markets
+  ctx.fillStyle = '#ffd700';
+  for (const m of state.npc_markets || []) {
+    const bs = Math.max(3, sc * 2);
+    ctx.fillRect(tx(m.x) - bs / 2, ty(m.y) - bs / 2, bs, bs);
+  }
+
+  // NPC shops
+  ctx.fillStyle = '#ff9944';
+  for (const sh of state.npc_shops || []) {
+    const bs = Math.max(3, sc * 2);
+    ctx.fillRect(tx(sh.x) - bs / 2, ty(sh.y) - bs / 2, bs, bs);
+    if (sc >= 1.5) {
+      ctx.font = '9px monospace';
+      ctx.fillStyle = '#ff9944';
+      ctx.textAlign = 'center';
+      ctx.fillText(sh.label || sh.key, tx(sh.x), ty(sh.y) - bs);
+    }
+  }
+
+  // Windfalls
+  for (const wf of state.windfalls || []) {
+    const col = WINDFALL_MAP_COLORS[wf.type] || '#ffd700';
+    ctx.fillStyle = col;
+    ctx.beginPath();
+    ctx.arc(tx(wf.x + 0.5), ty(wf.y + 0.5), Math.max(2.5, sc * 1.2), 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Other players
+  for (const pl of state.players || []) {
+    if (!pl || !state.player || pl.id === state.player.id) continue;
+    ctx.fillStyle = '#6ab0e8';
+    ctx.beginPath();
+    ctx.arc(tx(pl.x + 0.5), ty(pl.y + 0.5), Math.max(3, sc * 1.6), 0, Math.PI * 2);
+    ctx.fill();
+    if (sc >= 1.0) {
+      ctx.font = '10px monospace';
+      ctx.fillStyle = '#6ab0e8';
+      ctx.textAlign = 'center';
+      ctx.fillText(pl.username || '?', tx(pl.x + 0.5), ty(pl.y + 0.5) - Math.max(4, sc * 2));
+    }
+  }
+
+  // Current player — always draw last
+  if (state.player) {
+    const { x, y } = state.player;
+    ctx.fillStyle = '#ff4444';
+    ctx.beginPath();
+    ctx.arc(tx(x + 0.5), ty(y + 0.5), Math.max(4, sc * 2), 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  }
+
+  // Legend
+  ctx.fillStyle = '#ffffff88';
+  ctx.font = '11px monospace';
+  ctx.textAlign = 'left';
+  ctx.fillText(`Zoom: ${sc.toFixed(2)} px/tile  [scroll to zoom]  [drag to pan]`, 8, H - 8);
+}
+
 // ------------------------------------------------------------ close menus
 function closeAllMenus() {
   state.buildMenuOpen = false;
@@ -1556,6 +1752,7 @@ function handleKey(key, isRepeat) {
     return;
   }
   if (lk === 'h')  { toggleHud(); return; }
+  if (lk === 'm')  { toggleMap(); return; }
   if (key === ' ') { WS.send({ type: 'sell' }); return; }
   if (lk === 'b')  { _handleBuyParcel(); return; }
   if (lk === 'p')  { openBuildMenu(); return; }
@@ -1690,6 +1887,9 @@ window.addEventListener('load', () => {
     }, handleKey);
 
     window.addEventListener('keydown', (e) => {
+      if (_mapOpen && (e.key === 'm' || e.key === 'M' || e.key === 'Escape')) {
+        closeMap(); e.preventDefault(); return;
+      }
       if (!state.sellAutopilotActive) return;
       if (e.ctrlKey || e.altKey || e.metaKey) return;
       if (e.key === 'h' || e.key === 'H') return;
@@ -1697,6 +1897,36 @@ window.addEventListener('load', () => {
       e.preventDefault();
       e.stopPropagation();
     }, true);
+
+    // Map canvas interactions
+    const mapCanvas = document.getElementById('map-canvas');
+    if (mapCanvas) {
+      mapCanvas.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        const factor = e.deltaY < 0 ? 1.18 : (1 / 1.18);
+        _mapScale = Math.max(0.35, Math.min(10, _mapScale * factor));
+        drawMap();
+      }, { passive: false });
+      mapCanvas.addEventListener('mousedown', (e) => {
+        _mapDragging = true;
+        _mapDragStartX = e.clientX;
+        _mapDragStartY = e.clientY;
+        _mapDragCenterX = _mapCenterX;
+        _mapDragCenterY = _mapCenterY;
+        mapCanvas.style.cursor = 'grabbing';
+      });
+      window.addEventListener('mouseup', () => {
+        if (_mapDragging) { _mapDragging = false; mapCanvas.style.cursor = 'grab'; }
+      });
+      window.addEventListener('mousemove', (e) => {
+        if (!_mapDragging || !_mapOpen) return;
+        const dx = (e.clientX - _mapDragStartX) / _mapScale;
+        const dy = (e.clientY - _mapDragStartY) / _mapScale;
+        _mapCenterX = _mapDragCenterX - dx;
+        _mapCenterY = _mapDragCenterY - dy;
+        drawMap();
+      });
+    }
 
     WS.on('init', msg => {
       state.player        = msg.player;
@@ -1719,8 +1949,10 @@ window.addEventListener('load', () => {
       state.npc_markets   = msg.npc_markets || (msg.market ? [msg.market] : []);
       state.npc_shops     = msg.npc_shops || [];
       state.prices        = msg.prices;
+      state.market_prices = msg.market_prices || null;
       state.season        = msg.season;
       state.world         = msg.world || { w: 1000, h: 1000 };
+      state.windfalls     = msg.windfalls || [];
       _checkTownCrossing();
     });
 
@@ -1761,7 +1993,9 @@ window.addEventListener('load', () => {
       state.poor_soil_tiles = msg.poor_soil_tiles || [];
       state.crops   = msg.crops  || [];
       state.prices  = msg.prices;
+      state.market_prices = msg.market_prices || null;
       state.season  = msg.season;
+      state.windfalls = msg.windfalls || [];
       _checkTownCrossing();
       // Cancel parcel preview if player moved off that parcel
       if (state.parcelPreview !== null) {
@@ -1869,6 +2103,16 @@ window.addEventListener('load', () => {
 
     function loop(now) {
       Input.update(now, state.player, state.world);
+
+      // Auto-close shop menu when player drives away
+      if (state.shopMenuOpen && state.player && state.npc_shops.length) {
+        const { tx, ty } = _playerTileXY(state.player);
+        const stillNear = state.npc_shops.some(
+          sh => sh.key === state.shopType && Math.abs(sh.x - tx) <= 1 && Math.abs(sh.y - ty) <= 1
+        );
+        if (!stillNear) closeAllMenus();
+      }
+
       state.cameraFollowDriving = !!(
         state.player
         && (
@@ -1884,6 +2128,7 @@ window.addEventListener('load', () => {
       );
       Renderer.draw();
       updateHud();
+      if (_mapOpen) drawMap();
       if (!state.hudVisible && state.player) {
         document.getElementById('hud-toggle').textContent =
           `[H] hud  (${state.player.x}, ${state.player.y})`;
